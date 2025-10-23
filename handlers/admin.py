@@ -50,9 +50,11 @@ import os
 # Создаем router для админки
 router = Router(name='admin')
 
-# CRIT-004/CRIT-005 FIX: Get admin password from environment directly
-# This prevents circular imports and ensures config is loaded only once in bot.py
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+# Получаем хеш пароля администратора из .env
+# По умолчанию используется хеш от "admin123"
+# Для генерации хеша: import hashlib; print(hashlib.sha256("your_password".encode()).hexdigest())
+DEFAULT_ADMIN_HASH = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"  # admin123
+ADMIN_PASS_HASH = os.getenv("ADMIN_PASS_HASH", DEFAULT_ADMIN_HASH)
 
 # Хранилище попыток ввода пароля {user_id: {"attempts": int, "blocked_until": datetime}}
 password_attempts: Dict[int, dict] = {}
@@ -181,10 +183,8 @@ async def process_admin_password(message: Message, state: FSMContext):
         return
     
     # Проверяем пароль
-    # CRIT-005 FIX: Use environment variable directly
-    correct_password_hash = hash_password(ADMIN_PASSWORD)
-    
-    if check_password(input_password, correct_password_hash):
+    # Сравниваем хеш введенного пароля с хешем из .env
+    if check_password(input_password, ADMIN_PASS_HASH):
         # Пароль верный
         reset_password_attempts(user_id)
         await state.set_state(AdminStates.authorized)
