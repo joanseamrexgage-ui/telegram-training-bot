@@ -26,6 +26,7 @@ from handlers import start, general_info, sales, sport, admin, common
 from middlewares.auth import AuthMiddleware
 from middlewares.logging import LoggingMiddleware
 from middlewares.throttling import ThrottlingMiddleware
+from middlewares.errors import ErrorHandlingMiddleware  # VERSION 2.0
 from utils.logger import logger
 # PRODUCTION MONITORING: Sentry integration for error tracking
 from utils.sentry_config import init_sentry
@@ -89,15 +90,19 @@ async def main():
     # 1. Throttling - защита от спама (первым, чтобы блокировать раньше)
     dp.message.middleware(ThrottlingMiddleware())
     dp.callback_query.middleware(ThrottlingMiddleware())
-    
+
     # 2. Auth - авторизация и сохранение пользователей
     dp.message.middleware(AuthMiddleware())
     dp.callback_query.middleware(AuthMiddleware())
-    
-    # 3. Logging - логирование действий (последним, чтобы логировать все)
+
+    # 3. Error Handling - глобальная обработка ошибок (VERSION 2.0)
+    dp.message.middleware(ErrorHandlingMiddleware())
+    dp.callback_query.middleware(ErrorHandlingMiddleware())
+
+    # 4. Logging - логирование действий (последним, чтобы логировать все)
     dp.message.middleware(LoggingMiddleware())
     dp.callback_query.middleware(LoggingMiddleware())
-    
+
     logger.info("✅ Middlewares зарегистрированы")
     
     # Регистрируем handlers
@@ -110,7 +115,52 @@ async def main():
     dp.include_router(common.router)  # Общие handlers (назад, помощь) - ПОСЛЕДНИМИ!
     
     logger.info("✅ Handlers зарегистрированы")
-    
+
+    # VERSION 2.0: Глобальный обработчик ошибок
+    @dp.errors()
+    async def global_error_handler(event, exception):
+        """
+        Глобальный обработчик непойманных ошибок
+
+        Срабатывает, когда ошибка не была обработана middleware или handler.
+        Логирует ошибку и отправляет в Sentry.
+        """
+        from aiogram.types import Update, ErrorEvent
+
+        logger.exception(
+            f"💥 Глобальная ошибка в обработчике:\n"
+            f"  Тип: {type(exception).__name__}\n"
+            f"  Сообщение: {str(exception)}\n"
+            f"  Update: {event.update if hasattr(event, 'update') else 'N/A'}"
+        )
+
+        # Отправляем в Sentry если доступен
+        try:
+            from utils.sentry_config import capture_exception_with_context
+
+            # Извлекаем user_id если возможно
+            user_id = None
+            if hasattr(event, 'update') and isinstance(event.update, Update):
+                if event.update.message and event.update.message.from_user:
+                    user_id = event.update.message.from_user.id
+                elif event.update.callback_query and event.update.callback_query.from_user:
+                    user_id = event.update.callback_query.from_user.id
+
+            capture_exception_with_context(
+                exception=exception,
+                user_id=user_id,
+                extra={
+                    "event_type": type(event).__name__,
+                    "update_id": event.update.update_id if hasattr(event, 'update') else None,
+                }
+            )
+        except Exception as sentry_error:
+            logger.error(f"Ошибка отправки в Sentry: {sentry_error}")
+
+        return True  # Помечаем ошибку как обработанную
+
+    logger.info("✅ Глобальный обработчик ошибок зарегистрирован")
+
     # Информация о боте
     try:
         bot_info = await bot.get_me()

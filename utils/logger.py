@@ -1,5 +1,11 @@
 """
-Настройка системы логирования с использованием Loguru
+VERSION 2.0: Настройка системы логирования с использованием Loguru
+
+Конфигурация для production:
+- Ротация логов при достижении 10 MB
+- Хранение логов в течение 7 дней
+- Сжатие старых файлов в ZIP
+- Асинхронная запись для производительности
 """
 
 from loguru import logger
@@ -57,26 +63,26 @@ def setup_logger(
         log_dir = Path(log_dir) if not isinstance(log_dir, Path) else log_dir
         log_dir.mkdir(exist_ok=True)
         
-        # Основной лог-файл с ротацией
+        # Основной лог-файл с ротацией (VERSION 2.0)
         logger.add(
-            log_dir / "bot_{time:YYYY-MM-DD}.log",
+            log_dir / "bot.log",
             format=file_format,
             level=log_level,
-            rotation="00:00",  # Новый файл каждый день
-            retention="30 days",  # Храним 30 дней
+            rotation="10 MB",  # VERSION 2.0: Ротация при 10 MB
+            retention="7 days",  # VERSION 2.0: Хранение 7 дней
             compression="zip",  # Сжимаем старые файлы
             backtrace=True,  # Полная трассировка ошибок
             diagnose=True,  # Диагностическая информация
             enqueue=True  # Асинхронная запись
         )
         
-        # Отдельный файл для ошибок
+        # Отдельный файл для ошибок (VERSION 2.0)
         logger.add(
-            log_dir / "errors_{time:YYYY-MM-DD}.log",
+            log_dir / "errors.log",
             format=file_format,
             level="ERROR",
-            rotation="1 week",
-            retention="90 days",
+            rotation="10 MB",  # VERSION 2.0: Ротация при 10 MB
+            retention="7 days",  # VERSION 2.0: Хранение 7 дней
             compression="zip",
             backtrace=True,
             diagnose=True,
