@@ -150,15 +150,15 @@ async def back_to_main_menu(
     """Возврат в главное меню через inline кнопку"""
     try:
         await state.set_state(MenuStates.main_menu)
-        
+
         await callback.message.edit_text(
             text=RETURN_TEXT,
             reply_markup=get_main_menu_keyboard()
         )
-        
+
         # Отвечаем на callback чтобы убрать "часики"
         await callback.answer()
-        
+
         # Логируем действие
         log_user_action(
             user_id=callback.from_user.id,
@@ -166,11 +166,77 @@ async def back_to_main_menu(
             action="back_to_main",
             details={"from_state": await state.get_state()}
         )
-        
+
     except Exception as e:
         logger.error(f"Ошибка при возврате в главное меню: {e}", exc_info=True)
         await callback.answer(
             "Произошла ошибка. Используйте команду /menu",
+            show_alert=True
+        )
+
+
+@router.callback_query(F.data == "main_menu")
+async def handle_main_menu_button(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db_session: AsyncSession
+):
+    """
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Обработчик кнопки "Главное меню"
+
+    Ранее этот обработчик отсутствовал, из-за чего кнопка "Главное меню"
+    во всех разделах (отдел продаж, спортивный отдел, общая информация)
+    не работала - только мигала без перехода.
+
+    Теперь обрабатывает callback_data="main_menu" из всех клавиатур:
+    - keyboards/general_info_kb.py
+    - keyboards/sales_kb.py
+    - keyboards/sport_kb.py
+    - keyboards/admin_kb.py
+    """
+    try:
+        # Логируем попытку возврата в главное меню
+        current_state = await state.get_state()
+        logger.info(
+            f"Пользователь {callback.from_user.id} (@{callback.from_user.username}) "
+            f"возвращается в главное меню из состояния: {current_state}"
+        )
+
+        # Очищаем состояние и устанавливаем главное меню
+        await state.set_state(MenuStates.main_menu)
+
+        # Обновляем сообщение с главным меню
+        await callback.message.edit_text(
+            text=RETURN_TEXT,
+            reply_markup=get_main_menu_keyboard()
+        )
+
+        # Отвечаем на callback чтобы убрать "часики"
+        await callback.answer("🏠 Главное меню")
+
+        # Логируем успешное действие
+        log_user_action(
+            user_id=callback.from_user.id,
+            username=callback.from_user.username,
+            action="main_menu_button",
+            details={
+                "from_state": current_state,
+                "success": True
+            }
+        )
+
+        logger.info(
+            f"✅ Пользователь {callback.from_user.id} успешно вернулся в главное меню"
+        )
+
+    except Exception as e:
+        # ИСПРАВЛЕНИЕ: Расширенное логирование ошибок с полным stack trace
+        logger.error(
+            f"❌ Ошибка при возврате в главное меню для пользователя {callback.from_user.id}: {e}",
+            exc_info=True
+        )
+        await callback.answer(
+            "Произошла ошибка. Попробуйте команду /menu",
             show_alert=True
         )
 

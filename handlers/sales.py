@@ -66,7 +66,9 @@ async def show_sales_menu(callback: CallbackQuery, state: FSMContext):
     # ИСПРАВЛЕНИЕ: Добавлено подробное логирование для диагностики ошибок
     logger.info(f"Пользователь {callback.from_user.id} открывает меню 'Отдел продаж'")
 
-    await state.set_state(MenuStates.sales_menu)
+    # ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: было MenuStates.sales_menu (не существует)
+    # Правильное состояние: MenuStates.sales_department (определено в states/menu_states.py:25)
+    await state.set_state(MenuStates.sales_department)
 
     main_menu_text = CONTENT.get("main_menu", {})
     text = (
