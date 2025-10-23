@@ -1,0 +1,24 @@
+# ========== ОСНОВНЫЕ ЗАВИСИМОСТИ ==========
+
+# Telegram Bot Framework
+aiogram==3.16.0
+aiohttp==3.11.10
+
+# База данных
+sqlalchemy[asyncio]==2.0.36
+aiosqlite==0.20.0  # Для SQLite (для продакшена можно заменить на PostgreSQL)
+# asyncpg==0.30.0  # Раскомментировать для PostgreSQL
+
+# Переменные окружения
+python-dotenv==1.0.1
+environs==11.2.0
+
+# Логирование
+loguru==0.7.3
+
+# Работа с файлами
+aiofiles==24.1.0
+
+# Утилиты
+pydantic==2.10.4
+pydantic-settings==2.7.0

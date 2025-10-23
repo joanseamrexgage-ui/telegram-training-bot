@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  # ========== TELEGRAM BOT ==========
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: training_bot
+    restart: unless-stopped
+    
+    # Переменные окружения из .env файла
+    env_file:
+      - .env
+    
+    # Volumes для сохранения данных
+    volumes:
+      - ./logs:/app/logs                    # Логи
+      - ./content:/app/content              # Контент (медиа-файлы)
+      - ./training_bot.db:/app/training_bot.db  # SQLite БД (для SQLite)
+    
+    # Зависит от базы данных (если используется PostgreSQL)
+    # depends_on:
+    #   - db
+    
+    # Сеть
+    networks:
+      - bot_network
+    
+    # Мониторинг здоровья контейнера
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ========== POSTGRESQL DATABASE (опционально) ==========
+  # Раскомментируйте этот блок если используете PostgreSQL
+  # db:
+  #   image: postgres:15-alpine
+  #   container_name: training_bot_db
+  #   restart: unless-stopped
+  #   
+  #   environment:
+  #     POSTGRES_DB: ${DB_NAME}
+  #     POSTGRES_USER: ${DB_USER}
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
+  #   
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   
+  #   ports:
+  #     - "5432:5432"
+  #   
+  #   networks:
+  #     - bot_network
+  #   
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # ========== ADMINER (опционально) ==========
+  # Web-интерфейс для управления базой данных
+  # adminer:
+  #   image: adminer:latest
+  #   container_name: training_bot_adminer
+  #   restart: unless-stopped
+  #   
+  #   ports:
+  #     - "8080:8080"
+  #   
+  #   networks:
+  #     - bot_network
+  #   
+  #   depends_on:
+  #     - db
+
+# ========== NETWORKS ==========
+networks:
+  bot_network:
+    driver: bridge
+
+# ========== VOLUMES ==========
+volumes:
+  # Для PostgreSQL (раскомментируйте если используете)
+  # postgres_data:
+  #   driver: local
+  pass: {}
