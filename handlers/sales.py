@@ -63,22 +63,27 @@ except json.JSONDecodeError as e:
 @router.callback_query(F.data == "sales")
 async def show_sales_menu(callback: CallbackQuery, state: FSMContext):
     """Показывает главное меню раздела "Отдел продаж"."""
+    # ИСПРАВЛЕНИЕ: Добавлено подробное логирование для диагностики ошибок
+    logger.info(f"Пользователь {callback.from_user.id} открывает меню 'Отдел продаж'")
+
     await state.set_state(MenuStates.sales_menu)
-    
+
     main_menu_text = CONTENT.get("main_menu", {})
     text = (
         f"<b>{main_menu_text.get('title', '🔴 Отдел продаж')}</b>\n\n"
         f"{main_menu_text.get('description', 'Выберите интересующий раздел:')}"
     )
-    
+
     try:
         await callback.message.edit_text(
             text=text,
             reply_markup=get_sales_menu()
         )
         await callback.answer()
+        logger.info(f"Меню 'Отдел продаж' успешно показано пользователю {callback.from_user.id}")
     except Exception as e:
-        logger.error(f"Ошибка в show_sales_menu: {e}")
+        # ИСПРАВЛЕНИЕ: Расширенное логирование ошибок с полным traceback
+        logger.error(f"❌ Ошибка в show_sales_menu для пользователя {callback.from_user.id}: {e}", exc_info=True)
         await callback.answer("Произошла ошибка")
 
 

@@ -88,8 +88,9 @@ async def main():
     
     # Регистрируем middlewares (порядок важен!)
     # 1. Throttling - защита от спама (первым, чтобы блокировать раньше)
-    dp.message.middleware(ThrottlingMiddleware())
-    dp.callback_query.middleware(ThrottlingMiddleware())
+    # ОТКЛЮЧЕНО: Убрана логика ограничения частоты кликов по запросу пользователя
+    # dp.message.middleware(ThrottlingMiddleware())
+    # dp.callback_query.middleware(ThrottlingMiddleware())
 
     # 2. Auth - авторизация и сохранение пользователей
     dp.message.middleware(AuthMiddleware())

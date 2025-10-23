@@ -107,18 +107,26 @@ async def show_addresses_menu(callback: CallbackQuery):
 async def show_park_address(callback: CallbackQuery):
     """
     Показывает адрес и информацию о конкретном парке.
-    
+
     Обрабатывает callback: park_zeleno, park_kashir, park_columb
     """
     park_code = callback.data.split("_")[1]  # zeleno, kashir, columb
-    
+    # ИСПРАВЛЕНИЕ: Добавлено подробное логирование для диагностики проблемы с адресами ТРЦ
+    logger.info(f"Пользователь {callback.from_user.id} запрашивает адрес парка '{park_code}'")
+
     addresses = CONTENT.get("addresses", {})
     park_info = addresses.get(park_code, {})
-    
+
     if not park_info:
-        await callback.answer("Информация о парке не найдена", show_alert=True)
+        # ИСПРАВЛЕНИЕ: Улучшенное сообщение об отсутствии информации
+        logger.warning(f"⚠️ Информация о парке '{park_code}' не найдена в JSON для пользователя {callback.from_user.id}")
+        logger.debug(f"Доступные парки в JSON: {list(addresses.keys())}")
+        await callback.answer(
+            f"Информация о выбранном ТРЦ временно недоступна. Обратитесь к администратору.",
+            show_alert=True
+        )
         return
-    
+
     text = (
         f"<b>🏢 {park_info.get('name')}</b>\n\n"
         f"<b>📍 Адрес:</b>\n{park_info.get('full_address')}\n\n"
@@ -127,15 +135,17 @@ async def show_park_address(callback: CallbackQuery):
         f"<b>🗺️ Расположение в ТРЦ:</b>\n{park_info.get('location_in_mall')}\n\n"
         f"<b>🅿️ Парковка:</b>\n{park_info.get('parking')}"
     )
-    
+
     try:
         await callback.message.edit_text(
             text=text,
             reply_markup=get_back_to_addresses()
         )
         await callback.answer()
+        logger.info(f"✅ Адрес парка '{park_code}' успешно показан пользователю {callback.from_user.id}")
     except Exception as e:
-        logger.error(f"Ошибка в show_park_address: {e}")
+        # ИСПРАВЛЕНИЕ: Расширенное логирование ошибок с полным traceback
+        logger.error(f"❌ Ошибка в show_park_address для парка '{park_code}', пользователь {callback.from_user.id}: {e}", exc_info=True)
         await callback.answer("Ошибка загрузки информации")
 
 
