@@ -29,11 +29,11 @@ services:
     
     # Мониторинг здоровья контейнера
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import sys; sys.exit(0)'"]
+      test: ["CMD-SHELL", "python /app/healthcheck.py"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 40s  # Дать время на инициализацию БД
 
   # ========== POSTGRESQL DATABASE (опционально) ==========
   # Раскомментируйте этот блок если используете PostgreSQL
