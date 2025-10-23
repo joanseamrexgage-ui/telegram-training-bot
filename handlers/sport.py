@@ -57,7 +57,9 @@ async def show_sport_menu(callback: CallbackQuery, state: FSMContext):
     # ИСПРАВЛЕНИЕ: Добавлено подробное логирование для диагностики ошибок
     logger.info(f"Пользователь {callback.from_user.id} открывает меню 'Спортивный отдел'")
 
-    await state.set_state(MenuStates.sport_menu)
+    # ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: было MenuStates.sport_menu (не существует)
+    # Правильное состояние: MenuStates.sport_department (определено в states/menu_states.py:85)
+    await state.set_state(MenuStates.sport_department)
 
     main_menu_text = CONTENT.get("main_menu", {})
     text = (
