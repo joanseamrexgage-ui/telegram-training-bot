@@ -75,21 +75,24 @@ class Config:
 def load_config() -> Config:
     """
     Загрузка и валидация конфигурации из переменных окружения
-    
+
     Returns:
         Config: Объект с конфигурацией приложения
-    
+
     Raises:
         ValueError: Если обязательные переменные не установлены
     """
     # Обязательные переменные
     bot_token = os.getenv("BOT_TOKEN")
     if not bot_token:
-        raise ValueError("BOT_TOKEN не установлен! Проверьте файл .env")
+        raise ValueError(
+            "❌ КРИТИЧЕСКАЯ ОШИБКА: BOT_TOKEN не установлен!\n"
+            "Пожалуйста, создайте файл .env на основе .env.example и заполните BOT_TOKEN"
+        )
     
     admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
     if admin_password == "admin123":
-        print("⚠️ ВНИМАНИЕ: Используется пароль по умолчанию для админки!")
+        print("⚠️ ВНИМАНИЕ: Используется пароль по умолчанию для админки! Измените его в .env!")
     
     # Парсим список админских ID
     admin_ids_str = os.getenv("ADMIN_IDS", "")
@@ -150,5 +153,6 @@ def load_config() -> Config:
     )
 
 
-# Создаем глобальный объект конфигурации
-config = load_config()
+# CRIT-004 FIX: Removed global config loading
+# Config should only be loaded in bot.py on startup using load_config()
+# This prevents circular imports and ensures clean initialization
