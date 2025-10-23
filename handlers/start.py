@@ -322,7 +322,7 @@ async def cmd_feedback(message: Message, state: FSMContext):
 
 
 # Обработчик неизвестных команд
-@router.message(Command())
+@router.message(Command("unknown"))
 async def unknown_command(message: Message):
     """Обработчик неизвестных команд"""
     await message.answer(

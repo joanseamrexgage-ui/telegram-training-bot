@@ -45,11 +45,18 @@ from keyboards.sport_kb import (
 )
 
 from keyboards.admin_kb import (
-    get_admin_menu,
-    get_admin_users_menu,
-    get_admin_stats_menu,
-    get_admin_broadcast_menu,
-    get_admin_content_menu,
+    get_admin_main_menu,
+    get_stats_menu,
+    get_users_menu,
+    get_user_actions,
+    get_content_menu,
+    get_content_section_menu,
+    get_broadcast_menu,
+    get_broadcast_confirm,
+    get_back_to_admin,
+    get_cancel_button,
+    get_edit_actions,
+    get_pagination_keyboard,
 )
 
 __all__ = [
@@ -81,9 +88,16 @@ __all__ = [
     'get_injury_menu',
     'get_back_to_sport',
     # Админ-панель
-    'get_admin_menu',
-    'get_admin_users_menu',
-    'get_admin_stats_menu',
-    'get_admin_broadcast_menu',
-    'get_admin_content_menu',
+    'get_admin_main_menu',
+    'get_stats_menu',
+    'get_users_menu',
+    'get_user_actions',
+    'get_content_menu',
+    'get_content_section_menu',
+    'get_broadcast_menu',
+    'get_broadcast_confirm',
+    'get_back_to_admin',
+    'get_cancel_button',
+    'get_edit_actions',
+    'get_pagination_keyboard',
 ]

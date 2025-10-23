@@ -12,17 +12,12 @@ from aiogram.fsm.state import State, StatesGroup
 from states.menu_states import MenuStates
 
 # Импортируем состояния админ-панели
-from states.admin_states import (
-    AdminAuthState,
-    AdminBroadcastState,
-    AdminContentEditState,
-)
+from states.admin_states import AdminStates, ContentEditStates
 
 __all__ = [
     'State',
     'StatesGroup',
     'MenuStates',
-    'AdminAuthState',
-    'AdminBroadcastState',
-    'AdminContentEditState',
+    'AdminStates',
+    'ContentEditStates',
 ]
