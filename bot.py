@@ -27,6 +27,8 @@ from middlewares.auth import AuthMiddleware
 from middlewares.logging import LoggingMiddleware
 from middlewares.throttling import ThrottlingMiddleware
 from utils.logger import logger
+# PRODUCTION MONITORING: Sentry integration for error tracking
+from utils.sentry_config import init_sentry
 
 
 async def main():
@@ -43,7 +45,15 @@ async def main():
     """
     
     logger.info("🚀 Запуск бота для обучения сотрудников...")
-    
+
+    # PRODUCTION MONITORING: Initialize Sentry for error tracking
+    init_sentry(
+        enable_performance=True,
+        enable_profiling=False,
+        traces_sample_rate=0.1,  # Sample 10% of transactions
+        profiles_sample_rate=0.0  # Disable profiling by default
+    )
+
     # Загружаем конфигурацию
     try:
         config = load_config()

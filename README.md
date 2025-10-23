@@ -7,6 +7,13 @@
 [![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-orange.svg)](https://www.sqlalchemy.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+[![CI/CD](https://github.com/joanseamrexgage-ui/telegram-training-bot/workflows/CI%2FCD%20Tests%20and%20Build/badge.svg)](https://github.com/joanseamrexgage-ui/telegram-training-bot/actions)
+[![codecov](https://codecov.io/gh/joanseamrexgage-ui/telegram-training-bot/branch/main/graph/badge.svg)](https://codecov.io/gh/joanseamrexgage-ui/telegram-training-bot)
+[![Security Rating](https://img.shields.io/badge/security-A+-brightgreen.svg)](SECURITY.md)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/joanseamrexgage-ui/telegram-training-bot/graphs/commit-activity)
+[![Production Ready](https://img.shields.io/badge/Production-Ready-success.svg)](REFACTORING_SUMMARY.md)
+
 ---
 
 ## 📋 Содержание

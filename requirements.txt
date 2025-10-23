@@ -16,6 +16,9 @@ environs==11.2.0
 # Логирование
 loguru==0.7.3
 
+# Production мониторинг и error tracking
+sentry-sdk==1.45.0
+
 # Работа с файлами
 aiofiles==24.1.0
 
