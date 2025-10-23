@@ -641,10 +641,204 @@ class AdminLogCRUD:
             return []
 
 
-# Экспорт классов
+# ========== CRIT-005 & MOD-001 FIX: Compatibility wrapper functions ==========
+# These functions provide backward compatibility for handlers that expect
+# standalone functions instead of CRUD classes.
+
+async def get_all_users(limit: int = 100) -> List[Dict]:
+    """Wrapper: Get all users as dict list"""
+    async for session in get_db_session():
+        users = await UserCRUD.get_all_users(session, limit=limit)
+        return [
+            {
+                "id": u.id,
+                "telegram_id": u.telegram_id,
+                "username": u.username,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "is_blocked": u.is_blocked,
+                "registration_date": u.registration_date.strftime("%d.%m.%Y") if u.registration_date else "неизвестно"
+            }
+            for u in users
+        ]
+    return []
+
+
+async def get_user_by_telegram_id(telegram_id: int) -> Optional[Dict]:
+    """Wrapper: Get user by telegram ID as dict"""
+    async for session in get_db_session():
+        user = await UserCRUD.get_user_by_telegram_id(session, telegram_id)
+        if user:
+            return {
+                "id": user.id,
+                "telegram_id": user.telegram_id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "is_blocked": user.is_blocked,
+                "block_reason": user.block_reason
+            }
+    return None
+
+
+async def block_user(telegram_id: int, reason: Optional[str] = None) -> bool:
+    """Wrapper: Block user"""
+    async for session in get_db_session():
+        return await UserCRUD.block_user(session, telegram_id, reason)
+    return False
+
+
+async def unblock_user(telegram_id: int) -> bool:
+    """Wrapper: Unblock user"""
+    async for session in get_db_session():
+        return await UserCRUD.unblock_user(session, telegram_id)
+    return False
+
+
+async def get_user_activity(user_id: int, limit: int = 50) -> List[Dict]:
+    """Wrapper: Get user activity as dict list"""
+    async for session in get_db_session():
+        activities = await ActivityCRUD.get_user_activity(session, user_id, limit)
+        return [
+            {
+                "action": a.action,
+                "section": a.section,
+                "timestamp": a.timestamp.strftime("%d.%m.%Y %H:%M:%S") if a.timestamp else ""
+            }
+            for a in activities
+        ]
+    return []
+
+
+async def get_statistics() -> Dict[str, Any]:
+    """Wrapper: Get general statistics"""
+    async for session in get_db_session():
+        from datetime import datetime, timedelta
+        from sqlalchemy import select, func
+
+        # Total users
+        total_users = await UserCRUD.get_users_count(session)
+
+        # Active today
+        today = datetime.utcnow().date()
+        active_today_stmt = select(func.count(User.id)).where(
+            func.date(User.last_activity) == today
+        )
+        active_today = await session.scalar(active_today_stmt) or 0
+
+        # Active this week
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        active_week_stmt = select(func.count(User.id)).where(
+            User.last_activity >= week_ago
+        )
+        active_week = await session.scalar(active_week_stmt) or 0
+
+        # New this week
+        new_week_stmt = select(func.count(User.id)).where(
+            User.registration_date >= week_ago
+        )
+        new_this_week = await session.scalar(new_week_stmt) or 0
+
+        # Blocked users
+        blocked_stmt = select(func.count(User.id)).where(User.is_blocked == True)
+        blocked_users = await session.scalar(blocked_stmt) or 0
+
+        # Activity stats
+        activity_stats = await ActivityCRUD.get_activity_stats(session, days=7)
+
+        return {
+            "total_users": total_users,
+            "active_today": active_today,
+            "active_week": active_week,
+            "new_this_week": new_this_week,
+            "blocked_users": blocked_users,
+            "total_actions": activity_stats.get("total_actions", 0),
+            "actions_today": 0,  # TODO: Calculate
+            "avg_actions_per_day": activity_stats.get("total_actions", 0) / 7 if activity_stats else 0
+        }
+    return {}
+
+
+async def get_active_users_count() -> int:
+    """Wrapper: Get count of active users"""
+    async for session in get_db_session():
+        return await UserCRUD.get_users_count(session, is_active=True)
+    return 0
+
+
+async def get_new_users_count(days: int = 7) -> int:
+    """Wrapper: Get count of new users in last N days"""
+    async for session in get_db_session():
+        from datetime import datetime, timedelta
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        stmt = select(func.count(User.id)).where(User.registration_date >= cutoff)
+        return await session.scalar(stmt) or 0
+    return 0
+
+
+async def get_blocked_users() -> List[Dict]:
+    """Wrapper: Get blocked users"""
+    async for session in get_db_session():
+        users = await UserCRUD.get_all_users(session, is_blocked=True, limit=100)
+        return [
+            {
+                "telegram_id": u.telegram_id,
+                "username": u.username,
+                "first_name": u.first_name,
+                "block_reason": u.block_reason
+            }
+            for u in users
+        ]
+    return []
+
+
+async def get_section_statistics(days: int = 30) -> List[tuple]:
+    """Wrapper: Get popular sections"""
+    async for session in get_db_session():
+        return await ActivityCRUD.get_popular_sections(session, days=days)
+    return []
+
+
+async def log_user_activity(
+    user_id: int,
+    action: str,
+    section: Optional[str] = None,
+    details: Optional[dict] = None
+) -> None:
+    """
+    MOD-001 FIX: Wrapper for logging user activity
+    Calls ActivityCRUD.log_activity with proper session management
+    """
+    try:
+        async for session in get_db_session():
+            await ActivityCRUD.log_activity(
+                session=session,
+                user_id=user_id,
+                action=action,
+                section=section,
+                details=details
+            )
+    except Exception as e:
+        logger.error(f"Error logging user activity: {e}")
+
+
+# Экспорт классов и wrapper functions
 __all__ = [
+    # CRUD Classes
     "UserCRUD",
     "ActivityCRUD",
     "ContentCRUD",
-    "AdminLogCRUD"
+    "AdminLogCRUD",
+    # Compatibility wrappers for admin.py
+    "get_all_users",
+    "get_user_by_telegram_id",
+    "block_user",
+    "unblock_user",
+    "get_user_activity",
+    "get_statistics",
+    "get_active_users_count",
+    "get_new_users_count",
+    "get_blocked_users",
+    "get_section_statistics",
+    "log_user_activity"
 ]

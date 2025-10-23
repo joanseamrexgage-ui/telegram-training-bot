@@ -43,14 +43,16 @@ from database.crud import (
     get_blocked_users,
     get_section_statistics
 )
-from config import load_config
+# CRIT-005 FIX: Don't load config globally
 from utils.logger import logger
+import os
 
 # Создаем router для админки
 router = Router(name='admin')
 
-# Загружаем конфигурацию
-config = load_config()
+# CRIT-004/CRIT-005 FIX: Get admin password from environment directly
+# This prevents circular imports and ensures config is loaded only once in bot.py
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
 # Хранилище попыток ввода пароля {user_id: {"attempts": int, "blocked_until": datetime}}
 password_attempts: Dict[int, dict] = {}
@@ -179,7 +181,8 @@ async def process_admin_password(message: Message, state: FSMContext):
         return
     
     # Проверяем пароль
-    correct_password_hash = hash_password(config.admin_password)
+    # CRIT-005 FIX: Use environment variable directly
+    correct_password_hash = hash_password(ADMIN_PASSWORD)
     
     if check_password(input_password, correct_password_hash):
         # Пароль верный

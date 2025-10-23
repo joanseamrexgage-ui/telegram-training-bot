@@ -53,8 +53,12 @@ async def main():
         sys.exit(1)
     
     # Инициализируем базу данных
+    # CRIT-002 FIX: Always pass config vars to init_db()
     try:
-        await init_db()
+        await init_db(
+            database_url=config.db.url,
+            echo=config.db.echo
+        )
         logger.info("✅ База данных инициализирована")
     except Exception as e:
         logger.critical(f"❌ Ошибка инициализации базы данных: {e}")
