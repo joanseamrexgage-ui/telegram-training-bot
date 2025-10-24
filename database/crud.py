@@ -9,10 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database.models import (
-    User, UserActivity, Content, TestQuestion, 
+    User, UserActivity, Content, TestQuestion,
     TestResult, TestAnswer, AdminLog, BroadcastMessage,
     Department, UserRole
 )
+# ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ #1: Добавлен импорт get_db_session
+# Ранее функция get_db_session использовалась в wrapper-функциях (строки 650, 669, 686, 693, 700, 715...),
+# но не была импортирована, что вызывало ошибку:
+# NameError: name 'get_db_session' is not defined
+# Это приводило к сбою всех обработчиков статистики и управления пользователями.
+from database.database import get_db_session
 from utils.logger import logger, log_database_operation
 import json
 
