@@ -565,6 +565,133 @@ async def show_section_stats(callback: CallbackQuery):
         await callback.answer("Ошибка", show_alert=True)
 
 
+@router.callback_query(F.data == "stats_users")
+async def show_users_stats(callback: CallbackQuery):
+    """
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Добавлен обработчик для "Статистика пользователей".
+
+    Ранее при нажатии на эту кнопку отсутствовал обработчик, что приводило
+    к бесконечному "думанию" бота без ответа.
+
+    Теперь обработчик быстро отвечает с информативным сообщением.
+    """
+    try:
+        logger.info(f"👤 Пользователь {callback.from_user.id} запросил статистику пользователей")
+
+        try:
+            # Получаем базовую статистику
+            stats = await get_statistics()
+
+            text = (
+                "👤 <b>Статистика пользователей</b>\n\n"
+                f"📊 <b>Общие показатели:</b>\n"
+                f"• Всего зарегистрировано: {stats.get('total_users', 0)}\n"
+                f"• Активных сегодня: {stats.get('active_today', 0)}\n"
+                f"• Активных за неделю: {stats.get('active_week', 0)}\n"
+                f"• Новых за неделю: {stats.get('new_this_week', 0)}\n"
+                f"• Заблокированных: {stats.get('blocked_users', 0)}\n\n"
+                f"📈 <b>Вовлеченность:</b>\n"
+                f"• Активность сегодня: {(stats.get('active_today', 0) / max(stats.get('total_users', 1), 1) * 100):.1f}%\n"
+                f"• Активность за неделю: {(stats.get('active_week', 0) / max(stats.get('total_users', 1), 1) * 100):.1f}%\n\n"
+                f"💡 <b>Подробная статистика по пользователям:</b>\n"
+                f"Используйте раздел \"Управление пользователями\" → \"Список всех пользователей\"\n\n"
+                f"🕐 Обновлено: {datetime.now().strftime('%H:%M:%S')}"
+            )
+
+            logger.info(f"✅ Статистика пользователей успешно сформирована")
+
+        except Exception as stats_error:
+            logger.error(f"❌ Ошибка при получении статистики пользователей: {stats_error}", exc_info=True)
+            text = (
+                "👤 <b>Статистика пользователей</b>\n\n"
+                "⚠️ Временно недоступна из-за технической ошибки.\n\n"
+                "Обратитесь к системному администратору."
+            )
+            await callback.answer("⚠️ Ошибка загрузки статистики", show_alert=True)
+
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=get_stats_menu()
+        )
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка в show_users_stats: {e}", exc_info=True)
+        await callback.answer("Ошибка", show_alert=True)
+
+
+@router.callback_query(F.data == "stats_dates")
+async def show_dates_stats(callback: CallbackQuery):
+    """
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Добавлен обработчик для "Статистика по датам".
+
+    Ранее при нажатии на эту кнопку отсутствовал обработчик, что приводило
+    к бесконечному "думанию" бота без ответа.
+    """
+    try:
+        logger.info(f"📅 Пользователь {callback.from_user.id} запросил статистику по датам")
+
+        text = (
+            "📅 <b>Статистика по датам</b>\n\n"
+            "⚠️ <b>Функция в разработке</b>\n\n"
+            "Детальная статистика по датам будет доступна в следующей версии.\n\n"
+            "Планируемый функционал:\n"
+            "• Активность по дням недели\n"
+            "• Пиковые часы использования\n"
+            "• Динамика регистраций\n"
+            "• Сравнение периодов\n\n"
+            "Пока используйте общую статистику и статистику пользователей."
+        )
+
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=get_stats_menu()
+        )
+        await callback.answer()
+        logger.info(f"✅ Показано сообщение о разработке для статистики по датам")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка в show_dates_stats: {e}", exc_info=True)
+        await callback.answer("Функция в разработке", show_alert=True)
+
+
+@router.callback_query(F.data == "stats_export")
+async def export_stats_to_excel(callback: CallbackQuery):
+    """
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Добавлен обработчик для "Экспорт в Excel".
+
+    Ранее при нажатии на эту кнопку отсутствовал обработчик, что приводило
+    к бесконечному "думанию" бота без ответа.
+    """
+    try:
+        logger.info(f"📊 Пользователь {callback.from_user.id} запросил экспорт статистики в Excel")
+
+        text = (
+            "📊 <b>Экспорт статистики в Excel</b>\n\n"
+            "⚠️ <b>Функция в разработке</b>\n\n"
+            "Экспорт данных в Excel будет доступен в следующей версии.\n\n"
+            "Планируемые отчеты:\n"
+            "• Полный список пользователей с контактами\n"
+            "• История активности по датам\n"
+            "• Статистика по разделам и материалам\n"
+            "• Результаты тестирований\n"
+            "• Отчеты по отделам\n\n"
+            "💡 Для получения данных обратитесь к системному администратору "
+            "с доступом к базе данных."
+        )
+
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=get_stats_menu()
+        )
+        await callback.answer()
+        logger.info(f"✅ Показано сообщение о разработке для экспорта в Excel")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка в export_stats_to_excel: {e}", exc_info=True)
+        await callback.answer("Функция в разработке", show_alert=True)
+
+
 # ========== УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ ==========
 
 @router.callback_query(F.data == "admin_users")
@@ -781,30 +908,131 @@ async def show_broadcast_menu(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Ошибка")
 
 
+@router.callback_query(F.data.startswith("broadcast_send_"))
+async def send_broadcast(callback: CallbackQuery, state: FSMContext):
+    """
+    Отправляет рассылку.
+
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Обработчик перемещен ВЫШЕ process_broadcast_target.
+    Ранее из-за неправильного порядка обработчиков callback "broadcast_send_all"
+    сначала обрабатывался в process_broadcast_target, где target = "send_all"
+    не проходил проверку и выдавал ошибку "Неизвестная аудитория".
+    """
+    try:
+        logger.info(f"📤 Пользователь {callback.from_user.id} подтвердил отправку рассылки")
+
+        data = await state.get_data()
+        broadcast_text = data.get("broadcast_text")
+        target = data.get("broadcast_target")
+
+        logger.info(f"📊 Рассылка для аудитории: {target}, текст: {broadcast_text[:50] if broadcast_text else 'None'}...")
+
+        await state.set_state(AdminStates.broadcast_sending)
+
+        # Получаем список получателей
+        if target == "all":
+            users = await get_all_users()
+            logger.info(f"📋 Получено {len(users) if users else 0} пользователей для рассылки 'всем'")
+        elif target == "active":
+            users = await get_all_users()  # TODO: фильтровать активных
+            logger.info(f"📋 Получено {len(users) if users else 0} активных пользователей")
+        else:
+            users = []
+            logger.warning(f"⚠️ Неизвестная аудитория: {target}")
+
+        # Отправляем рассылку
+        success_count = 0
+        fail_count = 0
+
+        await callback.message.edit_text("📤 Рассылка начата...")
+
+        for user in users:
+            if user.get('is_blocked'):
+                continue
+
+            try:
+                await callback.bot.send_message(
+                    chat_id=user.get('telegram_id'),
+                    text=f"📢 <b>Объявление от администрации</b>\n\n{broadcast_text}"
+                )
+                success_count += 1
+            except Exception as e:
+                logger.error(f"Ошибка отправки пользователю {user.get('telegram_id')}: {e}")
+                fail_count += 1
+
+        logger.info(
+            f"📢 Администратор {callback.from_user.id} отправил рассылку. "
+            f"Успешно: {success_count}, Ошибок: {fail_count}"
+        )
+
+        result_text = (
+            "✅ <b>Рассылка завершена</b>\n\n"
+            f"Успешно отправлено: {success_count}\n"
+            f"Ошибок: {fail_count}"
+        )
+
+        await callback.message.edit_text(
+            text=result_text,
+            reply_markup=get_back_to_admin()
+        )
+        await state.set_state(AdminStates.authorized)
+
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка при отправке рассылки: {e}", exc_info=True)
+        await callback.answer("Ошибка отправки рассылки", show_alert=True)
+
+
 @router.callback_query(F.data.startswith("broadcast_"))
 async def process_broadcast_target(callback: CallbackQuery, state: FSMContext):
-    """Обрабатывает выбор целевой аудитории."""
+    """
+    Обрабатывает выбор целевой аудитории.
+
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Добавлена проверка на "send_" в начале target.
+    Ранее callback_data "broadcast_send_all" также попадал в этот обработчик,
+    но после удаления "broadcast_" получалось target="send_all", которое
+    не проходило ни одну проверку и выдавало "Неизвестная аудитория".
+
+    Теперь такие callback игнорируются, т.к. они обрабатываются в send_broadcast выше.
+    """
     target = callback.data.replace("broadcast_", "")
-    
+
+    # ИСПРАВЛЕНИЕ: Игнорируем callback'и для отправки (они обрабатываются выше)
+    if target.startswith("send_"):
+        logger.debug(f"Игнорируем broadcast_send_ callback в process_broadcast_target")
+        return
+
+    logger.info(f"📢 Пользователь {callback.from_user.id} выбрал аудиторию рассылки: {target}")
+
     if target == "history":
         await callback.answer("История рассылок - в разработке", show_alert=True)
         return
-    
+
     # Подсчитываем количество получателей
-    if target == "all":
-        count = await get_active_users_count()
-        target_text = "всем пользователям"
-    elif target == "sales":
-        count = 0  # TODO: Реализовать подсчет по отделам
-        target_text = "отделу продаж"
-    elif target == "sport":
-        count = 0
-        target_text = "спортивному отделу"
-    elif target == "active":
-        count = await get_active_users_count()
-        target_text = "активным пользователям"
-    else:
-        await callback.answer("Неизвестная аудитория", show_alert=True)
+    try:
+        if target == "all":
+            count = await get_active_users_count()
+            target_text = "всем пользователям"
+            logger.info(f"✅ Выбрана аудитория 'все пользователи': {count} чел.")
+        elif target == "sales":
+            count = 0  # TODO: Реализовать подсчет по отделам
+            target_text = "отделу продаж"
+            logger.warning(f"⚠️ Аудитория 'отдел продаж' не реализована")
+        elif target == "sport":
+            count = 0
+            target_text = "спортивному отделу"
+            logger.warning(f"⚠️ Аудитория 'спортивный отдел' не реализована")
+        elif target == "active":
+            count = await get_active_users_count()
+            target_text = "активным пользователям"
+            logger.info(f"✅ Выбрана аудитория 'активные': {count} чел.")
+        else:
+            logger.error(f"❌ Неизвестная аудитория: {target}")
+            await callback.answer("Неизвестная аудитория", show_alert=True)
+            return
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при подсчете аудитории '{target}': {e}", exc_info=True)
+        await callback.answer("Ошибка получения данных об аудитории", show_alert=True)
         return
     
     await state.update_data(broadcast_target=target, broadcast_count=count)
@@ -859,59 +1087,8 @@ async def confirm_broadcast(message: Message, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.startswith("broadcast_send_"))
-async def send_broadcast(callback: CallbackQuery, state: FSMContext):
-    """Отправляет рассылку."""
-    data = await state.get_data()
-    broadcast_text = data.get("broadcast_text")
-    target = data.get("broadcast_target")
-    
-    await state.set_state(AdminStates.broadcast_sending)
-    
-    # Получаем список получателей
-    if target == "all":
-        users = await get_all_users()
-    elif target == "active":
-        users = await get_all_users()  # TODO: фильтровать активных
-    else:
-        users = []
-    
-    # Отправляем рассылку
-    success_count = 0
-    fail_count = 0
-    
-    await callback.message.edit_text("📤 Рассылка начата...")
-    
-    for user in users:
-        if user.get('is_blocked'):
-            continue
-        
-        try:
-            await callback.bot.send_message(
-                chat_id=user.get('telegram_id'),
-                text=f"📢 <b>Объявление от администрации</b>\n\n{broadcast_text}"
-            )
-            success_count += 1
-        except Exception as e:
-            logger.error(f"Ошибка отправки пользователю {user.get('telegram_id')}: {e}")
-            fail_count += 1
-    
-    logger.info(
-        f"📢 Администратор {callback.from_user.id} отправил рассылку. "
-        f"Успешно: {success_count}, Ошибок: {fail_count}"
-    )
-    
-    result_text = (
-        "✅ <b>Рассылка завершена</b>\n\n"
-        f"Успешно отправлено: {success_count}\n"
-        f"Ошибок: {fail_count}"
-    )
-    
-    await callback.message.edit_text(
-        text=result_text,
-        reply_markup=get_back_to_admin()
-    )
-    await state.set_state(AdminStates.authorized)
+# ИСПРАВЛЕНИЕ: Старый обработчик send_broadcast удален, т.к. новый добавлен выше (строка 784)
+# с улучшенным логированием и обработкой ошибок
 
 
 # ========== ЛОГИ ==========
