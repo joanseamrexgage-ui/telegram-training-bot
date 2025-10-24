@@ -821,9 +821,16 @@ async def get_blocked_users() -> List[Dict]:
 
 
 async def get_section_statistics(days: int = 30) -> List[tuple]:
-    """Wrapper: Get popular sections"""
+    """
+    Wrapper: Get popular sections statistics
+
+    ИСПРАВЛЕНИЕ: Добавлено логирование для диагностики
+    """
     async for session in get_db_session():
-        return await ActivityCRUD.get_popular_sections(session, days=days)
+        logger.info(f"📊 Запрос популярных разделов за последние {days} дней")
+        result = await ActivityCRUD.get_popular_sections(session, days=days)
+        logger.info(f"✅ Получено {len(result)} популярных разделов: {result}")
+        return result
     return []
 
 
@@ -831,11 +838,16 @@ async def log_user_activity(
     user_id: int,
     action: str,
     section: Optional[str] = None,
-    details: Optional[dict] = None
+    subsection: Optional[str] = None,
+    details: Optional[dict] = None,
+    callback_data: Optional[str] = None,
+    message_text: Optional[str] = None
 ) -> None:
     """
     MOD-001 FIX: Wrapper for logging user activity
     Calls ActivityCRUD.log_activity with proper session management
+
+    ИСПРАВЛЕНИЕ: Добавлены все параметры для полного логирования активности
     """
     try:
         async for session in get_db_session():
@@ -844,10 +856,14 @@ async def log_user_activity(
                 user_id=user_id,
                 action=action,
                 section=section,
-                details=details
+                subsection=subsection,
+                details=details,
+                callback_data=callback_data,
+                message_text=message_text
             )
+            logger.debug(f"✅ Активность залогирована: user_id={user_id}, action={action}, section={section}")
     except Exception as e:
-        logger.error(f"Error logging user activity: {e}")
+        logger.error(f"❌ Ошибка логирования активности: {e}", exc_info=True)
 
 
 async def get_recent_activity(limit: int = 50) -> List[Dict]:
@@ -1070,10 +1086,13 @@ async def get_users_for_export() -> List[Dict]:
             result = await session.execute(stmt)
             users = result.scalars().all()
 
+            logger.info(f"📊 Экспорт пользователей: найдено {len(users)} пользователей в БД")
+
             if not users:
+                logger.warning("⚠️ Нет пользователей для экспорта!")
                 return []
 
-            return [
+            users_list = [
                 {
                     "id": user.id,
                     "telegram_id": user.telegram_id,
@@ -1088,6 +1107,9 @@ async def get_users_for_export() -> List[Dict]:
                 }
                 for user in users
             ]
+
+            logger.info(f"✅ Сформирован список из {len(users_list)} пользователей для экспорта")
+            return users_list
 
         except Exception as e:
             logger.error(f"❌ Ошибка при получении пользователей для экспорта: {e}", exc_info=True)
