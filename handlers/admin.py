@@ -10,11 +10,15 @@ Handler для админ-панели.
 """
 
 import hashlib
+import json
+import shutil
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict
 
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 
@@ -41,7 +45,9 @@ from database.crud import (
     get_active_users_count,
     get_new_users_count,
     get_blocked_users,
-    get_section_statistics
+    get_section_statistics,
+    get_recent_activity,
+    get_all_activity_for_export
 )
 # CRIT-005 FIX: Don't load config globally
 from utils.logger import logger
@@ -521,16 +527,34 @@ async def show_general_stats(callback: CallbackQuery):
 @router.callback_query(F.data == "stats_sections")
 async def show_section_stats(callback: CallbackQuery):
     """
-    Показывает статистику по разделам.
+    Показывает статистику по разделам (популярные разделы).
 
-    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ #2: Добавлена обработка ошибок.
+    MVP FEATURE: Теперь показывает реальные данные за последние 7 дней.
+    ИСПРАВЛЕНИЕ: Изменен статус с "В разработке" на рабочий.
     """
+    # MVP: Маппинг технических названий разделов на человекочитаемые
+    SECTION_NAMES = {
+        "general_info": "📗 Общая информация",
+        "sales": "💼 Отдел продаж",
+        "sport": "⚽ Спортивный отдел",
+        "admin": "⚙️ Админ-панель",
+        "tests": "📝 Тесты",
+        "main_menu": "🏠 Главное меню",
+        None: "Без раздела"
+    }
+
     try:
-        logger.info(f"📱 Пользователь {callback.from_user.id} запросил статистику по разделам")
+        logger.info(f"📊 Пользователь {callback.from_user.id} запросил топ популярных разделов")
 
         try:
-            section_stats = await get_section_statistics()
-            logger.info(f"✅ Статистика по разделам получена")
+            # MVP: Получаем статистику за последние 7 дней (как требовал пользователь)
+            section_stats = await get_section_statistics(days=7)
+            logger.info(f"✅ Получено {len(section_stats)} разделов со статистикой")
+
+            # Дополнительное логирование для отладки
+            if section_stats:
+                logger.debug(f"Топ-3 раздела: {section_stats[:3]}")
+
         except Exception as stats_error:
             logger.error(
                 f"❌ Ошибка при получении статистики разделов: {stats_error}",
@@ -542,14 +566,31 @@ async def show_section_stats(callback: CallbackQuery):
                 show_alert=True
             )
 
-        text = "📱 <b>Популярные разделы</b>\n\n"
+        # MVP: Формируем красивый вывод
+        text = "📊 <b>Топ-5 разделов за 7 дней</b>\n\n"
 
         if section_stats:
-            for i, (section, count) in enumerate(section_stats[:10], 1):
+            # Ограничиваем топ-5, как просил пользователь
+            for i, (section, count) in enumerate(section_stats[:5], 1):
+                # Определяем эмодзи для топ-3
                 emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-                text += f"{emoji} {section}: {count} просмотров\n"
+
+                # Получаем человекочитаемое название раздела
+                section_name = SECTION_NAMES.get(section, f"❓ {section}")
+
+                # MVP: Форматируем вывод как просил пользователь
+                text += f"{emoji} {section_name} — {count} посещений\n"
+
+            # Добавляем общую информацию
+            total_views = sum(count for _, count in section_stats)
+            text += f"\n📈 <b>Всего просмотров:</b> {total_views}"
         else:
-            text += "Данных пока нет"
+            # MVP: Информативное сообщение вместо "Данных пока нет"
+            text += (
+                "Данных пока нет. Сбор статистики начат.\n\n"
+                "ℹ️ Статистика собирается автоматически при переходах пользователей по разделам.\n\n"
+                "Данные появятся после первых посещений разделов бота."
+            )
 
         await callback.message.edit_text(
             text=text,
@@ -1231,19 +1272,20 @@ async def show_content_menu(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("content_"))
-async def handle_content_section(callback: CallbackQuery):
+async def handle_content_section(callback: CallbackQuery, state: FSMContext):
     """
-    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ #4: Добавлен обработчик для подразделов редактирования контента.
+    MVP FEATURE: Полноценная реализация редактирования контента.
 
-    Ранее при нажатии на любой раздел (content_general, content_sales, content_sport и др.)
-    отсутствовал обработчик, что приводило к бесконечному "думанию" бота без ответа.
+    ИСПРАВЛЕНИЕ: Изменен статус с "В разработке" на рабочий.
 
-    Теперь обработчик быстро отвечает пользователю с информативным сообщением,
-    что функция находится в разработке.
+    Позволяет администратору:
+    - Просматривать структуру JSON-файлов
+    - Редактировать отдельные разделы
+    - Сохранять изменения
     """
     section = callback.data.replace("content_", "")
 
-    logger.info(f"📝 Пользователь {callback.from_user.id} пытается редактировать раздел '{section}'")
+    logger.info(f"📝 Пользователь {callback.from_user.id} открывает редактор контента '{section}'")
 
     section_names = {
         "general": "Общая информация",
@@ -1255,30 +1297,289 @@ async def handle_content_section(callback: CallbackQuery):
 
     section_name = section_names.get(section, section)
 
-    text = (
-        f"✏️ <b>Редактирование: {section_name}</b>\n\n"
-        "⚠️ <b>Функция в разработке</b>\n\n"
-        "Редактирование контента через бота будет доступно "
-        "в следующей версии.\n\n"
-        "Пока для редактирования контента используйте:\n"
-        "• Прямое редактирование JSON-файлов в content/texts/\n"
-        "• Загрузку медиа в content/media/\n\n"
-        "Обратитесь к системному администратору для помощи."
-    )
+    # MVP: Обработка загрузки файлов - оставляем как "в разработке"
+    if section in ["upload_video", "upload_doc"]:
+        text = (
+            f"✏️ <b>{section_name}</b>\n\n"
+            "⚠️ <b>Функция в разработке</b>\n\n"
+            "Загрузка медиафайлов через бота будет доступна в следующей версии.\n\n"
+            "Пока используйте прямую загрузку в папку content/media/"
+        )
+        try:
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=get_back_to_admin()
+            )
+            await callback.answer()
+            logger.info(f"✅ Показано сообщение о разработке для '{section}'")
+        except Exception as e:
+            logger.error(f"❌ Ошибка показа сообщения: {e}", exc_info=True)
+            await callback.answer("Ошибка", show_alert=True)
+        return
+
+    # MVP: Редактирование JSON-файлов
+    file_mapping = {
+        "general": "general_info.json",
+        "sales": "sales.json",
+        "sport": "sport.json"
+    }
+
+    if section not in file_mapping:
+        await callback.answer("Неизвестный раздел", show_alert=True)
+        return
+
+    file_name = file_mapping[section]
+    file_path = Path("content/texts") / file_name
 
     try:
+        # Загружаем JSON файл
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content_data = json.load(f)
+
+        logger.info(f"✅ Загружен файл {file_name}, найдено {len(content_data)} разделов")
+
+        # Создаем клавиатуру с ключами
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        keyboard_buttons = []
+        for key in content_data.keys():
+            # Создаем читаемое название для ключа
+            display_name = key.replace("_", " ").title()
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=f"📝 {display_name}",
+                    callback_data=f"edit_{section}_{key}"
+                )
+            ])
+
+        # Добавляем кнопку "Назад"
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text="◀️ Назад к выбору раздела",
+                callback_data="admin_content"
+            )
+        ])
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+        text = (
+            f"✏️ <b>Редактирование: {section_name}</b>\n\n"
+            f"📄 Файл: <code>{file_name}</code>\n"
+            f"📊 Разделов: {len(content_data)}\n\n"
+            "Выберите раздел для редактирования:"
+        )
+
+        # Сохраняем в state текущий раздел
+        await state.update_data(
+            current_section=section,
+            current_file=file_name,
+            content_data=content_data
+        )
+        await state.set_state(AdminStates.content_select_section)
+
         await callback.message.edit_text(
             text=text,
-            reply_markup=get_back_to_admin()
+            reply_markup=keyboard
         )
         await callback.answer()
-        logger.info(f"✅ Показано сообщение о разработке для раздела '{section}'")
+        logger.info(f"✅ Показано меню выбора ключей для '{section}'")
 
     except Exception as e:
         logger.error(f"❌ Ошибка при обработке content_{section}: {e}", exc_info=True)
         await callback.answer(
-            "Функция в разработке",
+            "Произошла ошибка при загрузке файла",
             show_alert=True
+        )
+
+
+@router.callback_query(F.data.startswith("edit_"))
+async def handle_edit_key(callback: CallbackQuery, state: FSMContext):
+    """
+    MVP FEATURE: Показывает текущее содержимое выбранного ключа и просит новое значение.
+
+    Обрабатывает callback вида: edit_{section}_{key}
+    """
+    try:
+        # Парсим callback_data: edit_general_main_menu
+        parts = callback.data.split("_", 2)  # ["edit", "general", "main_menu"]
+        if len(parts) < 3:
+            await callback.answer("Ошибка формата", show_alert=True)
+            return
+
+        section = parts[1]
+        key = parts[2]
+
+        logger.info(f"✏️ Пользователь {callback.from_user.id} редактирует ключ '{key}' в разделе '{section}'")
+
+        # Получаем данные из state
+        user_data = await state.get_data()
+        content_data = user_data.get("content_data", {})
+
+        if key not in content_data:
+            await callback.answer(f"Ключ '{key}' не найден", show_alert=True)
+            return
+
+        current_value = content_data[key]
+
+        # Форматируем текущее значение для отображения
+        if isinstance(current_value, dict):
+            current_value_str = json.dumps(current_value, ensure_ascii=False, indent=2)
+            value_type = "JSON объект"
+        elif isinstance(current_value, list):
+            current_value_str = json.dumps(current_value, ensure_ascii=False, indent=2)
+            value_type = "JSON массив"
+        else:
+            current_value_str = str(current_value)
+            value_type = "Текст"
+
+        # Ограничиваем длину для отображения в сообщении
+        if len(current_value_str) > 800:
+            display_value = current_value_str[:800] + "\n...\n(показано первые 800 символов)"
+        else:
+            display_value = current_value_str
+
+        display_name = key.replace("_", " ").title()
+
+        text = (
+            f"✏️ <b>Редактирование ключа</b>\n\n"
+            f"📝 Ключ: <code>{key}</code>\n"
+            f"📊 Тип: {value_type}\n\n"
+            f"<b>Текущее значение:</b>\n"
+            f"<pre>{display_value}</pre>\n\n"
+            f"📤 <b>Отправьте новое значение:</b>\n"
+            f"• Для простого текста - просто напишите текст\n"
+            f"• Для JSON - отправьте валидный JSON\n\n"
+            f"⚠️ Будьте внимательны! Изменения сохранятся в файл."
+        )
+
+        # Клавиатура с кнопкой отмены
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="❌ Отменить редактирование",
+                callback_data=f"content_{section}"
+            )]
+        ])
+
+        # Сохраняем в state информацию о редактируемом ключе
+        await state.update_data(
+            editing_key=key,
+            editing_section=section
+        )
+        await state.set_state(AdminStates.content_editing)
+
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=keyboard
+        )
+        await callback.answer()
+        logger.info(f"✅ Показано текущее значение ключа '{key}', ожидаем новое значение")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при показе редактора ключа: {e}", exc_info=True)
+        await callback.answer("Ошибка", show_alert=True)
+
+
+@router.message(StateFilter(AdminStates.content_editing))
+async def handle_new_content(message: Message, state: FSMContext):
+    """
+    MVP FEATURE: Принимает новое содержимое и сохраняет в JSON файл.
+
+    Обрабатывает текстовое сообщение с новым значением для ключа.
+    """
+    try:
+        logger.info(f"📥 Получено новое содержимое от пользователя {message.from_user.id}")
+
+        # Получаем данные из state
+        user_data = await state.get_data()
+        key = user_data.get("editing_key")
+        section = user_data.get("editing_section")
+        file_name = user_data.get("current_file")
+        content_data = user_data.get("content_data", {})
+
+        if not all([key, section, file_name]):
+            await message.answer("❌ Ошибка: данные сессии потеряны. Начните заново.")
+            await state.clear()
+            return
+
+        new_value_text = message.text.strip()
+
+        # Пытаемся распарсить как JSON
+        try:
+            new_value = json.loads(new_value_text)
+            logger.info(f"✅ Новое значение успешно распарсено как JSON")
+        except json.JSONDecodeError:
+            # Если не JSON, берем как простую строку
+            new_value = new_value_text
+            logger.info(f"ℹ️ Новое значение сохранено как обычный текст")
+
+        # Обновляем значение в словаре
+        old_value = content_data.get(key)
+        content_data[key] = new_value
+
+        # Сохраняем в файл
+        file_path = Path("content/texts") / file_name
+
+        # Создаем бэкап
+        backup_path = Path("content/texts") / f"{file_name}.backup"
+        if file_path.exists():
+            shutil.copy2(file_path, backup_path)
+            logger.info(f"✅ Создан бэкап: {backup_path}")
+
+        # Сохраняем обновленный JSON
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(content_data, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"✅ Файл {file_name} успешно обновлен. Ключ '{key}' изменен")
+
+        # Формируем сообщение об успехе
+        if isinstance(new_value, (dict, list)):
+            new_value_preview = json.dumps(new_value, ensure_ascii=False, indent=2)[:200]
+        else:
+            new_value_preview = str(new_value)[:200]
+
+        text = (
+            f"✅ <b>Изменения сохранены!</b>\n\n"
+            f"📄 Файл: <code>{file_name}</code>\n"
+            f"📝 Ключ: <code>{key}</code>\n\n"
+            f"<b>Новое значение:</b>\n"
+            f"<pre>{new_value_preview}</pre>\n\n"
+            f"💾 Создан бэкап: <code>{backup_path.name}</code>\n\n"
+            f"Изменения вступят в силу при следующем запросе этого раздела."
+        )
+
+        # Клавиатура для дальнейших действий
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="📝 Редактировать другой ключ",
+                callback_data=f"content_{section}"
+            )],
+            [InlineKeyboardButton(
+                text="◀️ К выбору раздела",
+                callback_data="admin_content"
+            )],
+            [InlineKeyboardButton(
+                text="🏠 В главное меню админки",
+                callback_data="admin_panel"
+            )]
+        ])
+
+        await message.answer(
+            text=text,
+            reply_markup=keyboard
+        )
+
+        # Очищаем state редактирования
+        await state.set_state(AdminStates.authorized)
+        logger.info(f"✅ Редактирование завершено успешно")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при сохранении нового содержимого: {e}", exc_info=True)
+        await message.answer(
+            f"❌ <b>Ошибка при сохранении:</b>\n\n"
+            f"<code>{str(e)}</code>\n\n"
+            f"Изменения НЕ сохранены. Проверьте формат данных и попробуйте снова."
         )
 
 
@@ -1492,6 +1793,189 @@ async def confirm_broadcast(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "admin_logs")
 async def show_logs(callback: CallbackQuery):
-    """Показывает последние логи."""
-    # TODO: Реализовать чтение логов из файла
-    await callback.answer("Просмотр логов - в разработке", show_alert=True)
+    """
+    Показывает последние 50 действий пользователей.
+
+    MVP FEATURE: Полноценная реализация просмотра логов активности.
+    ИСПРАВЛЕНИЕ: Изменен статус с "В разработке" на рабочий.
+    """
+    try:
+        logger.info(f"📋 Администратор {callback.from_user.id} запросил просмотр логов активности")
+
+        # MVP: Получаем последние 50 действий
+        try:
+            recent_logs = await get_recent_activity(limit=50)
+            logger.info(f"✅ Получено {len(recent_logs)} записей логов")
+        except Exception as logs_error:
+            logger.error(
+                f"❌ Ошибка при получении логов: {logs_error}",
+                exc_info=True
+            )
+            await callback.answer(
+                "❌ Ошибка загрузки логов активности",
+                show_alert=True
+            )
+            return
+
+        # MVP: Формируем красивый вывод
+        if recent_logs:
+            text = f"📋 <b>Последние {len(recent_logs)} действий</b>\n\n"
+
+            for log in recent_logs[:20]:  # Показываем только первые 20 в сообщении
+                # Форматируем вывод: кто, что, когда
+                username_display = f"@{log['username']}" if log['username'] != "без username" else log['first_name']
+                action_text = log['action'].replace("_", " ").title()
+
+                text += (
+                    f"👤 {username_display} (ID: {log['telegram_id']})\n"
+                    f"   📌 {action_text}"
+                )
+
+                # Добавляем раздел если есть
+                if log['section'] != "-":
+                    text += f" → {log['section']}"
+
+                text += f"\n   🕐 {log['timestamp_str']}\n\n"
+
+            # Если логов больше 20, добавляем информацию
+            if len(recent_logs) > 20:
+                text += f"... и ещё {len(recent_logs) - 20} записей\n\n"
+
+            text += (
+                "ℹ️ Для выгрузки полного лога за 30 дней используйте кнопку <b>Экспорт логов</b>.\n\n"
+                "📊 Всего показано записей: 20 из 50"
+            )
+        else:
+            # MVP: Информативное сообщение
+            text = (
+                "📋 <b>Логи активности</b>\n\n"
+                "В журнале пока только эти события.\n\n"
+                "ℹ️ Логирование активности происходит автоматически при действиях пользователей."
+            )
+
+        # Добавляем кнопку для экспорта
+        from keyboards.admin_kb import InlineKeyboardMarkup, InlineKeyboardButton
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="📥 Экспорт логов в файл",
+                callback_data="export_logs"
+            )],
+            [InlineKeyboardButton(
+                text="◀️ Назад к админке",
+                callback_data="return_to_admin"
+            )]
+        ])
+
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=keyboard
+        )
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(
+            f"❌ Критическая ошибка в show_logs: {e}",
+            exc_info=True
+        )
+        await callback.answer("❌ Ошибка отображения логов", show_alert=True)
+
+
+@router.callback_query(F.data == "export_logs")
+async def export_logs_to_file(callback: CallbackQuery):
+    """
+    Выгружает логи активности в текстовый файл.
+
+    MVP FEATURE: Экспорт логов за последние 30 дней в .txt файл.
+    """
+    try:
+        logger.info(f"📥 Администратор {callback.from_user.id} запросил экспорт логов")
+
+        await callback.answer("⏳ Генерация файла...", show_alert=False)
+
+        # Получаем все логи за последние 30 дней
+        try:
+            all_logs = await get_all_activity_for_export(days=30)
+            logger.info(f"✅ Получено {len(all_logs)} записей для экспорта")
+        except Exception as export_error:
+            logger.error(
+                f"❌ Ошибка при получении логов для экспорта: {export_error}",
+                exc_info=True
+            )
+            await callback.answer(
+                "❌ Ошибка получения данных для экспорта",
+                show_alert=True
+            )
+            return
+
+        if not all_logs:
+            await callback.answer(
+                "ℹ️ Нет данных для экспорта",
+                show_alert=True
+            )
+            return
+
+        # Генерируем текстовый файл
+        # Создаем временный файл
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"activity_logs_{timestamp}.txt"
+
+        # MVP: Формируем содержимое файла
+        content_lines = [
+            "=" * 80,
+            f"ЛОГИ АКТИВНОСТИ ПОЛЬЗОВАТЕЛЕЙ",
+            f"Период: последние 30 дней",
+            f"Сгенерировано: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}",
+            f"Всего записей: {len(all_logs)}",
+            "=" * 80,
+            ""
+        ]
+
+        for i, log in enumerate(all_logs, 1):
+            username = f"@{log['username']}" if log['username'] else log['first_name']
+            full_name = f"{log['first_name']} {log['last_name']}".strip()
+
+            content_lines.extend([
+                f"[{i}] {log['timestamp']}",
+                f"    Пользователь: {full_name} ({username})",
+                f"    Telegram ID: {log['telegram_id']}",
+                f"    Действие: {log['action']}",
+                f"    Раздел: {log['section'] or '-'}",
+                f"    Подраздел: {log['subsection'] or '-'}",
+                f"    Callback: {log['callback_data'] or '-'}",
+                "-" * 80,
+                ""
+            ])
+
+        content = "\n".join(content_lines)
+
+        # Сохраняем во временный файл
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False) as f:
+            f.write(content)
+            temp_path = f.name
+
+        # Отправляем файл пользователю
+        document = FSInputFile(temp_path, filename=filename)
+
+        await callback.message.answer_document(
+            document=document,
+            caption=(
+                f"📥 <b>Логи активности</b>\n\n"
+                f"📊 Всего записей: {len(all_logs)}\n"
+                f"📅 Период: 30 дней\n"
+                f"🕐 Сгенерировано: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+            )
+        )
+
+        # Удаляем временный файл
+        Path(temp_path).unlink(missing_ok=True)
+
+        await callback.answer("✅ Файл отправлен!")
+        logger.info(f"✅ Логи успешно экспортированы для администратора {callback.from_user.id}: {len(all_logs)} записей")
+
+    except Exception as e:
+        logger.error(
+            f"❌ Критическая ошибка в export_logs_to_file: {e}",
+            exc_info=True
+        )
+        await callback.answer("❌ Ошибка экспорта логов", show_alert=True)
