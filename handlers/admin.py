@@ -54,6 +54,7 @@ from database.crud import (
 )
 # CRIT-005 FIX: Don't load config globally
 from utils.logger import logger
+from utils.timezone import get_msk_now, format_msk_datetime
 import os
 
 # Создаем router для админки
@@ -84,18 +85,23 @@ def check_password(input_password: str, correct_password_hash: str) -> bool:
 
 
 def is_user_blocked_from_attempts(user_id: int) -> bool:
-    """Проверяет, заблокирован ли пользователь из-за неверных попыток."""
+    """
+    Проверяет, заблокирован ли пользователь из-за неверных попыток.
+
+    TIMEZONE: Использует московское время для проверки блокировки
+    """
     if user_id not in password_attempts:
         return False
-    
+
     blocked_until = password_attempts[user_id].get("blocked_until")
-    if blocked_until and datetime.now() < blocked_until:
+    # TIMEZONE: Сравниваем с московским временем
+    if blocked_until and get_msk_now() < blocked_until:
         return True
-    
+
     # Если время блокировки прошло, сбрасываем счетчик
-    if blocked_until and datetime.now() >= blocked_until:
+    if blocked_until and get_msk_now() >= blocked_until:
         password_attempts[user_id] = {"attempts": 0, "blocked_until": None}
-    
+
     return False
 
 
@@ -335,7 +341,8 @@ async def show_admin_panel(message: Message, state: FSMContext):
         text = (
             "🔒 <b>Админ-панель</b>\n\n"
             f"👤 Администратор: {message.from_user.full_name}\n"
-            f"🕐 Вход: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+            # TIMEZONE: Используем московское время для отображения
+            f"🕐 Вход: {get_msk_now().strftime('%d.%m.%Y %H:%M')} (МСК)\n\n"
             f"📊 <b>Быстрая статистика:</b>\n"
             f"• Всего пользователей: {stats.get('total_users', 0)}\n"
             f"• Активных сегодня: {stats.get('active_today', 0)}\n"
@@ -557,8 +564,9 @@ async def show_general_stats(callback: CallbackQuery):
             f"• Всего действий: {stats.get('total_actions', 0)}\n"
             f"• Действий сегодня: {stats.get('actions_today', 0)}\n"
             f"• Среднее действий/день: {stats.get('avg_actions_per_day', 0):.1f}\n\n"
+            # TIMEZONE: Время обновления отображается в МСК
             f"🕐 <b>Последнее обновление:</b>\n"
-            f"{datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+            f"{get_msk_now().strftime('%d.%m.%Y %H:%M:%S')} (МСК)"
         )
 
         await callback.message.edit_text(
@@ -688,7 +696,8 @@ async def show_users_stats(callback: CallbackQuery):
                 f"• Активность за неделю: {(stats.get('active_week', 0) / max(stats.get('total_users', 1), 1) * 100):.1f}%\n\n"
                 f"💡 <b>Подробная статистика по пользователям:</b>\n"
                 f"Используйте раздел \"Управление пользователями\" → \"Список всех пользователей\"\n\n"
-                f"🕐 Обновлено: {datetime.now().strftime('%H:%M:%S')}"
+                # TIMEZONE: Время обновления в МСК
+                f"🕐 Обновлено: {get_msk_now().strftime('%H:%M:%S')} (МСК)"
             )
 
             logger.info(f"✅ Статистика пользователей успешно сформирована")
@@ -742,7 +751,8 @@ async def show_dates_stats(callback: CallbackQuery):
             logger.info(f"ℹ️ Нет данных для статистики по датам")
         else:
             # MVP: Формируем красивый вывод
-            text = f"📅 <b>Статистика за {stats['days_analyzed']} дней</b>\n\n"
+            # TIMEZONE: Все данные статистики рассчитаны по московскому времени
+            text = f"📅 <b>Статистика за {stats['days_analyzed']} дней (МСК)</b>\n\n"
 
             # Общая информация
             text += (
@@ -778,9 +788,10 @@ async def show_dates_stats(callback: CallbackQuery):
                 text += "\n"
 
             # Пиковые часы
+            # TIMEZONE: Часы отображаются по московскому времени
             top_hours = stats.get("top_hours", [])
             if top_hours:
-                text += "⏰ <b>Пиковые часы:</b>\n"
+                text += "⏰ <b>Пиковые часы (МСК):</b>\n"
                 for i, hour_stat in enumerate(top_hours, 1):
                     hour = hour_stat["hour"]
                     text += (
@@ -836,7 +847,8 @@ async def export_stats_to_excel(callback: CallbackQuery):
             return
 
         # MVP: Создаем CSV файл
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # TIMEZONE: Используем московское время для имени файла
+        timestamp = get_msk_now().strftime("%Y%m%d_%H%M%S")
         filename = f"users_export_{timestamp}.csv"
 
         # Формируем CSV содержимое
@@ -876,11 +888,12 @@ async def export_stats_to_excel(callback: CallbackQuery):
         # Отправляем файл
         document = FSInputFile(temp_path, filename=filename)
 
+        # TIMEZONE: Время генерации в МСК
         caption = (
             f"📊 <b>Экспорт пользователей</b>\n\n"
             f"📁 Файл: <code>{filename}</code>\n"
             f"👥 Пользователей: {len(users_data)}\n"
-            f"📅 Сгенерировано: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+            f"📅 Сгенерировано: {get_msk_now().strftime('%d.%m.%Y %H:%M:%S')} (МСК)\n\n"
             f"💡 Откройте файл в Excel для просмотра"
         )
 
@@ -2105,7 +2118,8 @@ async def export_logs_to_file(callback: CallbackQuery):
 
         # Генерируем текстовый файл
         # Создаем временный файл
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # TIMEZONE: Используем московское время для имени файла и метки времени
+        timestamp = get_msk_now().strftime("%Y%m%d_%H%M%S")
         filename = f"activity_logs_{timestamp}.txt"
 
         # MVP: Формируем содержимое файла
@@ -2113,7 +2127,8 @@ async def export_logs_to_file(callback: CallbackQuery):
             "=" * 80,
             f"ЛОГИ АКТИВНОСТИ ПОЛЬЗОВАТЕЛЕЙ",
             f"Период: последние 30 дней",
-            f"Сгенерировано: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}",
+            # TIMEZONE: Время генерации файла в МСК
+            f"Сгенерировано: {get_msk_now().strftime('%d.%m.%Y %H:%M:%S')} (МСК)",
             f"Всего записей: {len(all_logs)}",
             "=" * 80,
             ""
@@ -2145,13 +2160,14 @@ async def export_logs_to_file(callback: CallbackQuery):
         # Отправляем файл пользователю
         document = FSInputFile(temp_path, filename=filename)
 
+        # TIMEZONE: Время генерации в caption в МСК
         await callback.message.answer_document(
             document=document,
             caption=(
                 f"📥 <b>Логи активности</b>\n\n"
                 f"📊 Всего записей: {len(all_logs)}\n"
                 f"📅 Период: 30 дней\n"
-                f"🕐 Сгенерировано: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+                f"🕐 Сгенерировано: {get_msk_now().strftime('%d.%m.%Y %H:%M:%S')} (МСК)"
             )
         )
 
