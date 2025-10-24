@@ -77,8 +77,17 @@ class LoggingMiddleware(BaseMiddleware):
         # Если не удалось получить пользователя, пропускаем логирование
         if not user:
             return await handler(event, data)
-        
+
         telegram_id = user.id
+
+        # ИСПРАВЛЕНИЕ: Получаем внутренний user_id из БД (добавляется AuthMiddleware)
+        # user_id из БД нужен для foreign key в UserActivity
+        db_user = data.get('db_user')
+        if not db_user:
+            logger.warning(f"⚠️ db_user не найден в data для пользователя {telegram_id}, пропускаем логирование")
+            return await handler(event, data)
+
+        internal_user_id = db_user.id  # Внутренний ID из таблицы users
         
         # Получаем текущее состояние FSM (если есть)
         state_name = None
@@ -95,16 +104,48 @@ class LoggingMiddleware(BaseMiddleware):
         
         # Сохраняем активность в БД
         try:
+            # ИСПРАВЛЕНИЕ: Передаем правильные параметры в log_user_activity
+            # Функция НЕ принимает параметр 'state', используем 'details' для хранения доп. информации
+            details_dict = {}
+            if state_name:
+                details_dict['fsm_state'] = state_name
+
+            # Для callback - сохраняем полные данные
+            callback_data_str = None
+            message_text_str = None
+
+            if isinstance(event, CallbackQuery) and event.data:
+                callback_data_str = event.data
+                # Определяем section по callback_data более точно
+                if event.data.startswith("general_info"):
+                    section = "general_info"
+                elif event.data.startswith("sales"):
+                    section = "sales"
+                elif event.data.startswith("sport"):
+                    section = "sport"
+                elif event.data.startswith("admin"):
+                    section = "admin"
+                elif event.data.startswith("tests"):
+                    section = "tests"
+                else:
+                    # Берем первую часть callback_data как section
+                    section = event.data.split('_')[0] if '_' in event.data else event.data[:50]
+
+            elif isinstance(event, Message):
+                message_text_str = event.text[:255] if event.text else None
+
             await log_user_activity(
-                user_id=telegram_id,
+                user_id=internal_user_id,  # ИСПРАВЛЕНИЕ: используем внутренний ID из БД
                 action=action,
                 section=section,
-                state=state_name
+                details=details_dict if details_dict else None,
+                callback_data=callback_data_str,
+                message_text=message_text_str
             )
-            
-            logger.debug(
-                f"📝 Активность сохранена: user={telegram_id}, "
-                f"action={action}, section={section}"
+
+            logger.info(
+                f"📝 Активность сохранена: telegram_id={telegram_id}, internal_id={internal_user_id}, "
+                f"action={action}, section={section}, callback={callback_data_str}"
             )
             
         except Exception as e:
