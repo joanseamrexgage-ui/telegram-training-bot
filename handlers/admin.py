@@ -1000,7 +1000,7 @@ async def show_users_list(callback: CallbackQuery):
             text += (
                 f"{status} <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
                 f"   ID: <code>{user.get('telegram_id')}</code>\n"
-                f"   Регистрация: {user.get('registration_date', 'неизвестно')}\n\n"
+                f"   Регистрация: {user.get('registration_date_str', 'неизвестно')}\n\n"
             )
 
         await callback.message.edit_text(
@@ -1015,6 +1015,92 @@ async def show_users_list(callback: CallbackQuery):
             exc_info=True
         )
         await callback.answer("Ошибка показа списка", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("users_list_page_"))
+async def handle_users_list_pagination(callback: CallbackQuery):
+    """
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ #2: Обработчик пагинации для списка пользователей.
+
+    Проблема: При нажатии на кнопки "Вперёд"/"Назад" в списке пользователей бот зависал,
+    так как обработчик для callback_data "users_list_page_*" полностью отсутствовал.
+
+    Решение: Добавлен полноценный обработчик с логированием и корректной обработкой страниц.
+    """
+    try:
+        # Извлекаем номер страницы из callback_data
+        page = int(callback.data.split("_")[-1])
+        logger.info(f"📄 Пользователь {callback.from_user.id} запросил страницу {page} списка пользователей")
+
+        # Получаем список пользователей
+        try:
+            users = await get_all_users()
+            logger.info(f"✅ Получено {len(users) if users else 0} пользователей для пагинации")
+        except Exception as users_error:
+            logger.error(
+                f"❌ Ошибка при получении списка пользователей для пагинации: {users_error}",
+                exc_info=True
+            )
+            await callback.answer(
+                "❌ Ошибка загрузки списка пользователей",
+                show_alert=True
+            )
+            return
+
+        if not users:
+            await callback.answer("Пользователей пока нет", show_alert=True)
+            return
+
+        # Настройки пагинации
+        per_page = 10
+        total_pages = (len(users) + per_page - 1) // per_page
+
+        # Проверяем корректность номера страницы
+        if page < 1 or page > total_pages:
+            logger.warning(f"⚠️ Запрошена некорректная страница: {page} (доступно: 1-{total_pages})")
+            await callback.answer(
+                f"Страница {page} не существует",
+                show_alert=True
+            )
+            return
+
+        # Вычисляем диапазон пользователей для текущей страницы
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        page_users = users[start_idx:end_idx]
+
+        logger.info(f"📊 Страница {page}/{total_pages}: отображение пользователей {start_idx+1}-{min(end_idx, len(users))} из {len(users)}")
+
+        # Формируем текст со списком пользователей на странице
+        text = f"📋 <b>Список пользователей</b> (стр. {page}/{total_pages})\n\n"
+
+        for user in page_users:
+            status = "🚫" if user.get('is_blocked') else "✅"
+            username = f"@{user.get('username')}" if user.get('username') else "нет username"
+
+            text += (
+                f"{status} <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
+                f"   ID: <code>{user.get('telegram_id')}</code>\n"
+                f"   Регистрация: {user.get('registration_date_str', 'неизвестно')}\n\n"
+            )
+
+        # Обновляем сообщение с новой страницей
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=get_pagination_keyboard(page, total_pages, "users_list")
+        )
+        await callback.answer()
+        logger.info(f"✅ Страница {page} списка пользователей успешно отображена для администратора {callback.from_user.id}")
+
+    except ValueError as ve:
+        logger.error(f"❌ Ошибка парсинга номера страницы из {callback.data}: {ve}")
+        await callback.answer("❌ Некорректный номер страницы", show_alert=True)
+    except Exception as e:
+        logger.error(
+            f"❌ Критическая ошибка в handle_users_list_pagination: {e}",
+            exc_info=True
+        )
+        await callback.answer("❌ Ошибка переключения страницы", show_alert=True)
 
 
 # ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Добавлены недостающие обработчики для кнопок управления пользователями
