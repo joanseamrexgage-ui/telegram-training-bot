@@ -936,6 +936,165 @@ async def get_all_activity_for_export(days: int = 30) -> List[Dict]:
     return []
 
 
+async def get_date_statistics(days: int = 30) -> Dict:
+    """
+    MVP FEATURE: Получить статистику по датам за последние N дней.
+
+    Возвращает:
+    - Статистику по дням недели (пн-вс)
+    - Топ-5 самых активных дней
+    - Статистику по часам (пиковые часы)
+    - Уникальные пользователи и действия по дням
+
+    Args:
+        days: Количество дней для анализа
+
+    Returns:
+        Dict: Словарь со статистикой
+    """
+    async for session in get_db_session():
+        try:
+            from collections import defaultdict
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+            # Получаем всю активность за период
+            stmt = (
+                select(UserActivity)
+                .where(UserActivity.timestamp >= cutoff_date)
+                .order_by(UserActivity.timestamp)
+            )
+            result = await session.execute(stmt)
+            activities = result.scalars().all()
+
+            if not activities:
+                return {
+                    "has_data": False,
+                    "days_analyzed": days
+                }
+
+            # Подсчет по дням недели (0=Пн, 6=Вс)
+            weekday_counts = defaultdict(int)
+            weekday_users = defaultdict(set)
+
+            # Подсчет по конкретным датам
+            daily_counts = defaultdict(int)
+            daily_users = defaultdict(set)
+
+            # Подсчет по часам
+            hourly_counts = defaultdict(int)
+
+            for activity in activities:
+                if not activity.timestamp:
+                    continue
+
+                # День недели
+                weekday = activity.timestamp.weekday()
+                weekday_counts[weekday] += 1
+                weekday_users[weekday].add(activity.user_id)
+
+                # Конкретная дата
+                date_key = activity.timestamp.strftime("%Y-%m-%d")
+                daily_counts[date_key] += 1
+                daily_users[date_key].add(activity.user_id)
+
+                # Час дня
+                hour = activity.timestamp.hour
+                hourly_counts[hour] += 1
+
+            # Формируем результат
+            weekday_names = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+            weekday_stats = [
+                {
+                    "weekday": weekday_names[day],
+                    "actions": weekday_counts[day],
+                    "unique_users": len(weekday_users[day])
+                }
+                for day in range(7)
+            ]
+
+            # Топ-5 самых активных дней
+            top_days = sorted(
+                [
+                    {
+                        "date": date,
+                        "actions": count,
+                        "unique_users": len(daily_users[date])
+                    }
+                    for date, count in daily_counts.items()
+                ],
+                key=lambda x: x["actions"],
+                reverse=True
+            )[:5]
+
+            # Топ-3 пиковых часа
+            top_hours = sorted(
+                [
+                    {"hour": hour, "actions": count}
+                    for hour, count in hourly_counts.items()
+                ],
+                key=lambda x: x["actions"],
+                reverse=True
+            )[:3]
+
+            total_actions = len(activities)
+            unique_users = len(set(a.user_id for a in activities if a.user_id))
+
+            logger.info(f"✅ Статистика по датам: {total_actions} действий, {unique_users} уникальных пользователей")
+
+            return {
+                "has_data": True,
+                "days_analyzed": days,
+                "total_actions": total_actions,
+                "unique_users": unique_users,
+                "weekday_stats": weekday_stats,
+                "top_days": top_days,
+                "top_hours": top_hours
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка при получении статистики по датам: {e}", exc_info=True)
+            return {"has_data": False, "error": str(e)}
+    return {"has_data": False}
+
+
+async def get_users_for_export() -> List[Dict]:
+    """
+    MVP FEATURE: Получить список всех пользователей для экспорта в Excel/CSV.
+
+    Returns:
+        List[Dict]: Список словарей с данными пользователей
+    """
+    async for session in get_db_session():
+        try:
+            stmt = select(User).order_by(User.registration_date.desc())
+            result = await session.execute(stmt)
+            users = result.scalars().all()
+
+            if not users:
+                return []
+
+            return [
+                {
+                    "id": user.id,
+                    "telegram_id": user.telegram_id,
+                    "username": user.username or "",
+                    "first_name": user.first_name or "",
+                    "last_name": user.last_name or "",
+                    "phone": user.phone or "",
+                    "registration_date": user.registration_date.strftime("%d.%m.%Y %H:%M:%S") if user.registration_date else "",
+                    "last_activity": user.last_activity.strftime("%d.%m.%Y %H:%M:%S") if user.last_activity else "",
+                    "is_blocked": "Да" if user.is_blocked else "Нет",
+                    "is_admin": "Да" if user.is_admin else "Нет"
+                }
+                for user in users
+            ]
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка при получении пользователей для экспорта: {e}", exc_info=True)
+            return []
+    return []
+
+
 # Экспорт классов и wrapper functions
 __all__ = [
     # CRUD Classes
@@ -957,5 +1116,8 @@ __all__ = [
     "log_user_activity",
     # MVP FEATURES: Activity logs
     "get_recent_activity",
-    "get_all_activity_for_export"
+    "get_all_activity_for_export",
+    # MVP FEATURES: Date statistics and Excel export
+    "get_date_statistics",
+    "get_users_for_export"
 ]
