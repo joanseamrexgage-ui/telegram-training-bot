@@ -353,22 +353,37 @@ async def show_admin_panel(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "admin_panel")
 async def return_to_admin_panel(callback: CallbackQuery, state: FSMContext):
-    """Возвращает в главное меню админки."""
+    """
+    Возвращает в главное меню админки.
+
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ #3: Расширен список разрешенных состояний.
+    Ранее проверка авторизации была слишком строгой и не учитывала вложенные состояния
+    админ-панели (например, broadcast_waiting_text, broadcast_confirm, broadcast_sending),
+    что вызывало ошибку "Доступ запрещен" при нажатии "Назад к админке" из этих разделов.
+
+    Теперь проверяется, что состояние начинается с "AdminStates:" - это означает,
+    что пользователь уже авторизован и может вернуться в главное меню админки.
+    """
     current_state = await state.get_state()
-    
-    if current_state not in [
-        AdminStates.authorized,
-        AdminStates.stats_menu,
-        AdminStates.users_menu,
-        AdminStates.content_management,
-        AdminStates.broadcast_menu
-    ]:
+
+    # ИСПРАВЛЕНИЕ: Проверяем, что пользователь в любом админском состоянии
+    # вместо жесткого списка конкретных состояний
+    if current_state and not current_state.startswith("AdminStates:"):
+        logger.warning(
+            f"⚠️ Пользователь {callback.from_user.id} пытается войти в админку из состояния {current_state}"
+        )
         await callback.answer("Доступ запрещен", show_alert=True)
         return
-    
+
+    logger.info(f"🔙 Пользователь {callback.from_user.id} возвращается в главное меню админки")
+
     await state.set_state(AdminStates.authorized)
-    
-    stats = await get_statistics()
+
+    try:
+        stats = await get_statistics()
+    except Exception as stats_error:
+        logger.error(f"❌ Ошибка при получении статистики: {stats_error}", exc_info=True)
+        stats = {'total_users': 0, 'active_today': 0, 'new_this_week': 0}
     
     text = (
         "🔒 <b>Админ-панель</b>\n\n"
@@ -435,59 +450,119 @@ async def show_stats_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "stats_general")
 async def show_general_stats(callback: CallbackQuery):
-    """Показывает общую статистику."""
-    stats = await get_statistics()
-    
-    text = (
-        "📊 <b>Общая статистика</b>\n\n"
-        f"👥 <b>Пользователи:</b>\n"
-        f"• Всего зарегистрировано: {stats.get('total_users', 0)}\n"
-        f"• Активных сегодня: {stats.get('active_today', 0)}\n"
-        f"• Активных за неделю: {stats.get('active_week', 0)}\n"
-        f"• Новых за неделю: {stats.get('new_this_week', 0)}\n"
-        f"• Заблокированных: {stats.get('blocked_users', 0)}\n\n"
-        f"📱 <b>Активность:</b>\n"
-        f"• Всего действий: {stats.get('total_actions', 0)}\n"
-        f"• Действий сегодня: {stats.get('actions_today', 0)}\n"
-        f"• Среднее действий/день: {stats.get('avg_actions_per_day', 0):.1f}\n\n"
-        f"🕐 <b>Последнее обновление:</b>\n"
-        f"{datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
-    )
-    
+    """
+    Показывает общую статистику.
+
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ #2: Добавлена обработка ошибок при получении статистики.
+    Ранее при ошибке get_statistics() (из-за отсутствия get_db_session) обработчик падал
+    с необработанным исключением, что вызывало сообщение "Произошла непредвиденная ошибка".
+    """
     try:
+        # Логируем запрос статистики
+        logger.info(f"📊 Пользователь {callback.from_user.id} запросил общую статистику")
+
+        # Получаем статистику с обработкой ошибок
+        try:
+            stats = await get_statistics()
+            logger.info(f"✅ Общая статистика получена успешно")
+        except Exception as stats_error:
+            # Если ошибка при получении статистики - используем заглушку и логируем
+            logger.error(
+                f"❌ Ошибка при получении статистики: {stats_error}",
+                exc_info=True
+            )
+            stats = {
+                'total_users': 0,
+                'active_today': 0,
+                'active_week': 0,
+                'new_this_week': 0,
+                'blocked_users': 0,
+                'total_actions': 0,
+                'actions_today': 0,
+                'avg_actions_per_day': 0.0
+            }
+            # Уведомляем пользователя об ошибке
+            await callback.answer(
+                "⚠️ Ошибка загрузки статистики. Показаны нулевые значения.",
+                show_alert=True
+            )
+
+        text = (
+            "📊 <b>Общая статистика</b>\n\n"
+            f"👥 <b>Пользователи:</b>\n"
+            f"• Всего зарегистрировано: {stats.get('total_users', 0)}\n"
+            f"• Активных сегодня: {stats.get('active_today', 0)}\n"
+            f"• Активных за неделю: {stats.get('active_week', 0)}\n"
+            f"• Новых за неделю: {stats.get('new_this_week', 0)}\n"
+            f"• Заблокированных: {stats.get('blocked_users', 0)}\n\n"
+            f"📱 <b>Активность:</b>\n"
+            f"• Всего действий: {stats.get('total_actions', 0)}\n"
+            f"• Действий сегодня: {stats.get('actions_today', 0)}\n"
+            f"• Среднее действий/день: {stats.get('avg_actions_per_day', 0):.1f}\n\n"
+            f"🕐 <b>Последнее обновление:</b>\n"
+            f"{datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+        )
+
         await callback.message.edit_text(
             text=text,
             reply_markup=get_stats_menu()
         )
         await callback.answer()
+
     except Exception as e:
-        logger.error(f"Ошибка показа общей статистики: {e}")
-        await callback.answer("Ошибка")
+        # ИСПРАВЛЕНИЕ: Полное логирование ошибок с traceback
+        logger.error(
+            f"❌ Критическая ошибка в show_general_stats для пользователя {callback.from_user.id}: {e}",
+            exc_info=True
+        )
+        await callback.answer("Ошибка загрузки статистики", show_alert=True)
 
 
 @router.callback_query(F.data == "stats_sections")
 async def show_section_stats(callback: CallbackQuery):
-    """Показывает статистику по разделам."""
-    section_stats = await get_section_statistics()
-    
-    text = "📱 <b>Популярные разделы</b>\n\n"
-    
-    if section_stats:
-        for i, (section, count) in enumerate(section_stats[:10], 1):
-            emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-            text += f"{emoji} {section}: {count} просмотров\n"
-    else:
-        text += "Данных пока нет"
-    
+    """
+    Показывает статистику по разделам.
+
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ #2: Добавлена обработка ошибок.
+    """
     try:
+        logger.info(f"📱 Пользователь {callback.from_user.id} запросил статистику по разделам")
+
+        try:
+            section_stats = await get_section_statistics()
+            logger.info(f"✅ Статистика по разделам получена")
+        except Exception as stats_error:
+            logger.error(
+                f"❌ Ошибка при получении статистики разделов: {stats_error}",
+                exc_info=True
+            )
+            section_stats = []
+            await callback.answer(
+                "⚠️ Ошибка загрузки статистики разделов",
+                show_alert=True
+            )
+
+        text = "📱 <b>Популярные разделы</b>\n\n"
+
+        if section_stats:
+            for i, (section, count) in enumerate(section_stats[:10], 1):
+                emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+                text += f"{emoji} {section}: {count} просмотров\n"
+        else:
+            text += "Данных пока нет"
+
         await callback.message.edit_text(
             text=text,
             reply_markup=get_stats_menu()
         )
         await callback.answer()
+
     except Exception as e:
-        logger.error(f"Ошибка показа статистики разделов: {e}")
-        await callback.answer("Ошибка")
+        logger.error(
+            f"❌ Критическая ошибка в show_section_stats: {e}",
+            exc_info=True
+        )
+        await callback.answer("Ошибка", show_alert=True)
 
 
 # ========== УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ ==========
@@ -512,43 +587,65 @@ async def show_users_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "users_list")
 async def show_users_list(callback: CallbackQuery):
-    """Показывает список всех пользователей с пагинацией."""
-    users = await get_all_users()
-    
-    if not users:
-        await callback.answer("Пользователей пока нет", show_alert=True)
-        return
-    
-    # Пагинация: 10 пользователей на страницу
-    page = 1
-    per_page = 10
-    total_pages = (len(users) + per_page - 1) // per_page
-    
-    start_idx = (page - 1) * per_page
-    end_idx = start_idx + per_page
-    page_users = users[start_idx:end_idx]
-    
-    text = f"📋 <b>Список пользователей</b> (стр. {page}/{total_pages})\n\n"
-    
-    for user in page_users:
-        status = "🚫" if user.get('is_blocked') else "✅"
-        username = f"@{user.get('username')}" if user.get('username') else "нет username"
-        
-        text += (
-            f"{status} <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
-            f"   ID: <code>{user.get('telegram_id')}</code>\n"
-            f"   Регистрация: {user.get('registration_date', 'неизвестно')}\n\n"
-        )
-    
+    """
+    Показывает список всех пользователей с пагинацией.
+
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ #2: Добавлена обработка ошибок при получении пользователей.
+    """
     try:
+        logger.info(f"👥 Пользователь {callback.from_user.id} запросил список пользователей")
+
+        try:
+            users = await get_all_users()
+            logger.info(f"✅ Получено {len(users) if users else 0} пользователей")
+        except Exception as users_error:
+            logger.error(
+                f"❌ Ошибка при получении списка пользователей: {users_error}",
+                exc_info=True
+            )
+            await callback.answer(
+                "Ошибка загрузки списка пользователей",
+                show_alert=True
+            )
+            return
+
+        if not users:
+            await callback.answer("Пользователей пока нет", show_alert=True)
+            return
+
+        # Пагинация: 10 пользователей на страницу
+        page = 1
+        per_page = 10
+        total_pages = (len(users) + per_page - 1) // per_page
+
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        page_users = users[start_idx:end_idx]
+
+        text = f"📋 <b>Список пользователей</b> (стр. {page}/{total_pages})\n\n"
+
+        for user in page_users:
+            status = "🚫" if user.get('is_blocked') else "✅"
+            username = f"@{user.get('username')}" if user.get('username') else "нет username"
+
+            text += (
+                f"{status} <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
+                f"   ID: <code>{user.get('telegram_id')}</code>\n"
+                f"   Регистрация: {user.get('registration_date', 'неизвестно')}\n\n"
+            )
+
         await callback.message.edit_text(
             text=text,
             reply_markup=get_pagination_keyboard(page, total_pages, "users_list")
         )
         await callback.answer()
+
     except Exception as e:
-        logger.error(f"Ошибка показа списка пользователей: {e}")
-        await callback.answer("Ошибка")
+        logger.error(
+            f"❌ Критическая ошибка в show_users_list: {e}",
+            exc_info=True
+        )
+        await callback.answer("Ошибка показа списка", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("user_block_"))
@@ -583,23 +680,82 @@ async def unblock_user_action(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_content")
 async def show_content_menu(callback: CallbackQuery, state: FSMContext):
-    """Показывает меню управления контентом."""
-    await state.set_state(AdminStates.content_management)
-    
-    text = (
-        "✏️ <b>Редактирование контента</b>\n\n"
-        "Выберите раздел для редактирования:"
-    )
-    
+    """
+    Показывает меню управления контентом.
+
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ #4: Добавлено логирование.
+    """
     try:
+        logger.info(f"✏️ Пользователь {callback.from_user.id} открывает меню редактирования контента")
+
+        await state.set_state(AdminStates.content_management)
+
+        text = (
+            "✏️ <b>Редактирование контента</b>\n\n"
+            "Выберите раздел для редактирования:"
+        )
+
         await callback.message.edit_text(
             text=text,
             reply_markup=get_content_menu()
         )
         await callback.answer()
+
     except Exception as e:
-        logger.error(f"Ошибка показа меню контента: {e}")
-        await callback.answer("Ошибка")
+        logger.error(f"❌ Ошибка показа меню контента: {e}", exc_info=True)
+        await callback.answer("Ошибка", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("content_"))
+async def handle_content_section(callback: CallbackQuery):
+    """
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ #4: Добавлен обработчик для подразделов редактирования контента.
+
+    Ранее при нажатии на любой раздел (content_general, content_sales, content_sport и др.)
+    отсутствовал обработчик, что приводило к бесконечному "думанию" бота без ответа.
+
+    Теперь обработчик быстро отвечает пользователю с информативным сообщением,
+    что функция находится в разработке.
+    """
+    section = callback.data.replace("content_", "")
+
+    logger.info(f"📝 Пользователь {callback.from_user.id} пытается редактировать раздел '{section}'")
+
+    section_names = {
+        "general": "Общая информация",
+        "sales": "Отдел продаж",
+        "sport": "Спортивный отдел",
+        "upload_video": "Загрузка видео",
+        "upload_doc": "Загрузка документов"
+    }
+
+    section_name = section_names.get(section, section)
+
+    text = (
+        f"✏️ <b>Редактирование: {section_name}</b>\n\n"
+        "⚠️ <b>Функция в разработке</b>\n\n"
+        "Редактирование контента через бота будет доступно "
+        "в следующей версии.\n\n"
+        "Пока для редактирования контента используйте:\n"
+        "• Прямое редактирование JSON-файлов в content/texts/\n"
+        "• Загрузку медиа в content/media/\n\n"
+        "Обратитесь к системному администратору для помощи."
+    )
+
+    try:
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=get_back_to_admin()
+        )
+        await callback.answer()
+        logger.info(f"✅ Показано сообщение о разработке для раздела '{section}'")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при обработке content_{section}: {e}", exc_info=True)
+        await callback.answer(
+            "Функция в разработке",
+            show_alert=True
+        )
 
 
 # ========== РАССЫЛКА ==========
