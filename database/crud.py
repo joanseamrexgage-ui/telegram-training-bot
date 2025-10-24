@@ -850,6 +850,92 @@ async def log_user_activity(
         logger.error(f"Error logging user activity: {e}")
 
 
+async def get_recent_activity(limit: int = 50) -> List[Dict]:
+    """
+    MVP FEATURE: Получить последние N действий пользователей.
+
+    Args:
+        limit: Количество записей для выборки
+
+    Returns:
+        List[Dict]: Список словарей с информацией об активности
+    """
+    async for session in get_db_session():
+        try:
+            stmt = (
+                select(UserActivity, User)
+                .join(User, UserActivity.user_id == User.id)
+                .order_by(desc(UserActivity.timestamp))
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            rows = result.all()
+
+            return [
+                {
+                    "id": activity.id,
+                    "user_id": activity.user_id,
+                    "telegram_id": user.telegram_id,
+                    "username": user.username or "без username",
+                    "first_name": user.first_name or "Пользователь",
+                    "action": activity.action,
+                    "section": activity.section or "-",
+                    "subsection": activity.subsection or "-",
+                    "timestamp": activity.timestamp,
+                    "timestamp_str": activity.timestamp.strftime("%d.%m.%Y %H:%M:%S") if activity.timestamp else "-"
+                }
+                for activity, user in rows
+            ]
+        except Exception as e:
+            logger.error(f"❌ Ошибка при получении последней активности: {e}", exc_info=True)
+            return []
+    return []
+
+
+async def get_all_activity_for_export(days: int = 30) -> List[Dict]:
+    """
+    MVP FEATURE: Получить всю активность за последние N дней для экспорта.
+
+    Args:
+        days: Количество дней для выборки
+
+    Returns:
+        List[Dict]: Список словарей с информацией об активности
+    """
+    async for session in get_db_session():
+        try:
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+            stmt = (
+                select(UserActivity, User)
+                .join(User, UserActivity.user_id == User.id)
+                .where(UserActivity.timestamp >= cutoff_date)
+                .order_by(desc(UserActivity.timestamp))
+            )
+            result = await session.execute(stmt)
+            rows = result.all()
+
+            return [
+                {
+                    "id": activity.id,
+                    "telegram_id": user.telegram_id,
+                    "username": user.username or "",
+                    "first_name": user.first_name or "",
+                    "last_name": user.last_name or "",
+                    "action": activity.action,
+                    "section": activity.section or "",
+                    "subsection": activity.subsection or "",
+                    "callback_data": activity.callback_data or "",
+                    "timestamp": activity.timestamp.strftime("%d.%m.%Y %H:%M:%S") if activity.timestamp else ""
+                }
+                for activity, user in rows
+            ]
+        except Exception as e:
+            logger.error(f"❌ Ошибка при получении активности для экспорта: {e}", exc_info=True)
+            return []
+    return []
+
+
 # Экспорт классов и wrapper functions
 __all__ = [
     # CRUD Classes
@@ -868,5 +954,8 @@ __all__ = [
     "get_new_users_count",
     "get_blocked_users",
     "get_section_statistics",
-    "log_user_activity"
+    "log_user_activity",
+    # MVP FEATURES: Activity logs
+    "get_recent_activity",
+    "get_all_activity_for_export"
 ]

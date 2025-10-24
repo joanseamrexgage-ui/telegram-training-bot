@@ -20,6 +20,8 @@ from aiogram.fsm.context import FSMContext
 from keyboards.general_info_kb import (
     get_general_info_menu,
     get_parks_menu,
+    get_parks_addresses_menu,  # ИСПРАВЛЕНИЕ: Добавлен импорт для адресов
+    get_parks_phones_menu,     # ИСПРАВЛЕНИЕ: Добавлен импорт для телефонов
     get_emergency_menu,
     get_orders_menu,
     get_discounts_parks_menu,
@@ -82,7 +84,13 @@ async def show_general_info_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "gen_addresses")
 async def show_addresses_menu(callback: CallbackQuery):
-    """Показывает меню выбора парка для просмотра адреса."""
+    """
+    Показывает меню выбора парка для просмотра адреса.
+
+    ИСПРАВЛЕНИЕ: Теперь использует get_parks_addresses_menu() с callback_data "addr_*"
+    """
+    logger.info(f"📍 Пользователь {callback.from_user.id} открыл меню адресов парков")
+
     text = (
         "<b>📍 Адреса парков</b>\n\n"
         "Выберите парк, чтобы узнать:\n"
@@ -91,11 +99,11 @@ async def show_addresses_menu(callback: CallbackQuery):
         "• Где найти парк в ТРЦ\n"
         "• Информацию о парковке"
     )
-    
+
     try:
         await callback.message.edit_text(
             text=text,
-            reply_markup=get_parks_menu()
+            reply_markup=get_parks_addresses_menu()  # ИСПРАВЛЕНИЕ: Используем отдельную клавиатуру для адресов
         )
         await callback.answer()
     except Exception as e:
@@ -103,16 +111,16 @@ async def show_addresses_menu(callback: CallbackQuery):
         await callback.answer("Ошибка загрузки меню")
 
 
-@router.callback_query(F.data.startswith("park_"))
+@router.callback_query(F.data.startswith("addr_"))
 async def show_park_address(callback: CallbackQuery):
     """
     Показывает адрес и информацию о конкретном парке.
 
-    Обрабатывает callback: park_zeleno, park_kashir, park_columb
+    ИСПРАВЛЕНИЕ: Теперь обрабатывает callback: addr_zeleno, addr_kashir, addr_columb
+    Изменено с park_* на addr_* для разделения логики адресов и телефонов.
     """
     park_code = callback.data.split("_")[1]  # zeleno, kashir, columb
-    # ИСПРАВЛЕНИЕ: Добавлено подробное логирование для диагностики проблемы с адресами ТРЦ
-    logger.info(f"Пользователь {callback.from_user.id} запрашивает адрес парка '{park_code}'")
+    logger.info(f"📍 Пользователь {callback.from_user.id} запрашивает адрес парка '{park_code}'")
 
     addresses = CONTENT.get("addresses", {})
     park_info = addresses.get(park_code, {})
@@ -153,7 +161,13 @@ async def show_park_address(callback: CallbackQuery):
 
 @router.callback_query(F.data == "gen_phones")
 async def show_phones_menu(callback: CallbackQuery):
-    """Показывает меню выбора парка для просмотра телефонов."""
+    """
+    Показывает меню выбора парка для просмотра телефонов.
+
+    ИСПРАВЛЕНИЕ: Теперь использует get_parks_phones_menu() с callback_data "phone_*"
+    """
+    logger.info(f"📞 Пользователь {callback.from_user.id} открыл меню важных телефонов")
+
     text = (
         "<b>📞 Важные номера телефонов</b>\n\n"
         "Выберите парк, чтобы узнать контакты:\n"
@@ -162,11 +176,11 @@ async def show_phones_menu(callback: CallbackQuery):
         "• Техническая поддержка\n"
         "• Экстренная связь"
     )
-    
+
     try:
         await callback.message.edit_text(
             text=text,
-            reply_markup=get_parks_menu()
+            reply_markup=get_parks_phones_menu()  # ИСПРАВЛЕНИЕ: Используем отдельную клавиатуру для телефонов
         )
         await callback.answer()
     except Exception as e:
@@ -174,24 +188,23 @@ async def show_phones_menu(callback: CallbackQuery):
         await callback.answer("Ошибка загрузки меню")
 
 
-@router.callback_query(F.data.startswith("park_") & F.data.in_(["park_zeleno", "park_kashir", "park_columb"]))
-async def show_park_phones(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("phone_"))
+async def show_park_phones(callback: CallbackQuery):
     """
     Показывает телефоны конкретного парка.
-    
-    Обрабатывает те же callback что и адреса, но проверяет текущее состояние.
+
+    ИСПРАВЛЕНИЕ: Теперь обрабатывает callback: phone_zeleno, phone_kashir, phone_columb
+    Изменено с park_* на phone_* для разделения логики адресов и телефонов.
+    Убрана ненужная проверка состояния FSM, которая не работала.
     """
-    # Получаем текущее состояние, чтобы понять, откуда пришел запрос
-    current_state = await state.get_state()
-    
-    # Если мы в разделе телефонов, показываем телефоны
-    # Иначе функция show_park_address обработает как адрес
-    
-    park_code = callback.data.split("_")[1]
+    park_code = callback.data.split("_")[1]  # zeleno, kashir, columb
+    logger.info(f"📞 Пользователь {callback.from_user.id} запрашивает телефоны парка '{park_code}'")
+
     phones = CONTENT.get("phones", {})
     park_phones = phones.get(park_code, {})
-    
+
     if not park_phones:
+        logger.warning(f"⚠️ Телефоны для парка '{park_code}' не найдены в JSON")
         await callback.answer("Информация о телефонах не найдена", show_alert=True)
         return
     
@@ -224,8 +237,9 @@ async def show_park_phones(callback: CallbackQuery, state: FSMContext):
             disable_web_page_preview=True
         )
         await callback.answer()
+        logger.info(f"✅ Телефоны парка '{park_code}' успешно показаны пользователю {callback.from_user.id}")
     except Exception as e:
-        logger.error(f"Ошибка в show_park_phones: {e}")
+        logger.error(f"❌ Ошибка в show_park_phones для парка '{park_code}': {e}", exc_info=True)
         await callback.answer("Ошибка загрузки телефонов")
 
 
