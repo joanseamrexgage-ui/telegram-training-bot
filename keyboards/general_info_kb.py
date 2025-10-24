@@ -52,8 +52,10 @@ def get_general_info_menu() -> InlineKeyboardMarkup:
 
 def get_parks_menu() -> InlineKeyboardMarkup:
     """
+    DEPRECATED: Используйте get_parks_addresses_menu() или get_parks_phones_menu().
+
     Меню выбора парка (для адресов и телефонов).
-    
+
     Returns:
         InlineKeyboardMarkup с кнопками трех парков
     """
@@ -69,6 +71,69 @@ def get_parks_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(
             text="🏢 ТРЦ Коламбус",
             callback_data="park_columb"
+        )],
+        [InlineKeyboardButton(
+            text="◀️ Назад",
+            callback_data="general_info"
+        )]
+    ])
+    return keyboard
+
+
+def get_parks_addresses_menu() -> InlineKeyboardMarkup:
+    """
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Отдельное меню для адресов парков.
+
+    Проблема: Ранее одна клавиатура get_parks_menu() использовалась и для адресов,
+    и для телефонов, из-за чего обработчики конфликтовали.
+
+    Returns:
+        InlineKeyboardMarkup с кнопками трех парков для просмотра адресов
+    """
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🏢 ТРЦ Зеленопарк",
+            callback_data="addr_zeleno"
+        )],
+        [InlineKeyboardButton(
+            text="🏢 ТРЦ Каширская плаза",
+            callback_data="addr_kashir"
+        )],
+        [InlineKeyboardButton(
+            text="🏢 ТРЦ Коламбус",
+            callback_data="addr_columb"
+        )],
+        [InlineKeyboardButton(
+            text="◀️ Назад",
+            callback_data="general_info"
+        )]
+    ])
+    return keyboard
+
+
+def get_parks_phones_menu() -> InlineKeyboardMarkup:
+    """
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Отдельное меню для телефонов парков.
+
+    Проблема: Ранее одна клавиатура get_parks_menu() использовалась и для адресов,
+    и для телефонов, из-за чего при нажатии на парк в разделе "Важные номера"
+    показывался адрес, а не телефоны.
+
+    Returns:
+        InlineKeyboardMarkup с кнопками трех парков для просмотра телефонов
+    """
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🏢 ТРЦ Зеленопарк",
+            callback_data="phone_zeleno"
+        )],
+        [InlineKeyboardButton(
+            text="🏢 ТРЦ Каширская плаза",
+            callback_data="phone_kashir"
+        )],
+        [InlineKeyboardButton(
+            text="🏢 ТРЦ Коламбус",
+            callback_data="phone_columb"
         )],
         [InlineKeyboardButton(
             text="◀️ Назад",
