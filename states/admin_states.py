@@ -34,6 +34,7 @@ class AdminStates(StatesGroup):
     users_viewing = State()  # Просмотр списка пользователей
     users_blocking = State()  # Блокировка пользователя
     users_waiting_id = State()  # Ожидание ID пользователя
+    waiting_user_search = State()  # ИСПРАВЛЕНИЕ: Добавлено состояние для поиска пользователя
     
     # Рассылка
     broadcast_menu = State()  # Меню рассылки
