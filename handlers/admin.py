@@ -775,13 +775,393 @@ async def show_users_list(callback: CallbackQuery):
         await callback.answer("Ошибка показа списка", show_alert=True)
 
 
+# ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Добавлены недостающие обработчики для кнопок управления пользователями
+# Проблема: При нажатии на кнопки "Поиск пользователя", "Заблокированные", "Активные сегодня", "Новые пользователи"
+# интерфейс бесконечно "думал" - обработчики полностью отсутствовали
+
+@router.callback_query(F.data == "users_search")
+async def handle_users_search(callback: CallbackQuery, state: FSMContext):
+    """
+    Обработчик кнопки "Поиск пользователя".
+
+    ИСПРАВЛЕНИЕ: Добавлен полностью отсутствующий обработчик.
+    """
+    try:
+        logger.info(f"🔍 Пользователь {callback.from_user.id} запросил поиск пользователя")
+
+        # Устанавливаем состояние ожидания ввода для поиска
+        await state.set_state(AdminStates.waiting_user_search)
+
+        text = (
+            "🔍 <b>Поиск пользователя</b>\n\n"
+            "Введите Telegram ID, username или имя пользователя для поиска:\n\n"
+            "Примеры:\n"
+            "• <code>123456789</code> (Telegram ID)\n"
+            "• <code>@username</code>\n"
+            "• <code>Иван</code> (имя)"
+        )
+
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=get_users_menu()  # Кнопка "Назад к управлению пользователями"
+        )
+        await callback.answer()
+        logger.info(f"✅ Отображено меню поиска пользователя для администратора {callback.from_user.id}")
+
+    except Exception as e:
+        logger.error(
+            f"❌ Критическая ошибка в handle_users_search: {e}",
+            exc_info=True
+        )
+        await callback.answer("❌ Ошибка открытия поиска", show_alert=True)
+
+
+@router.callback_query(F.data == "users_blocked")
+async def handle_users_blocked(callback: CallbackQuery):
+    """
+    Обработчик кнопки "Заблокированные пользователи".
+
+    ИСПРАВЛЕНИЕ: Добавлен полностью отсутствующий обработчик.
+    Получает список заблокированных пользователей из БД и отображает их.
+    """
+    try:
+        logger.info(f"🚫 Пользователь {callback.from_user.id} запросил список заблокированных пользователей")
+
+        try:
+            # Получаем заблокированных пользователей из БД
+            blocked_users = await get_blocked_users()
+            logger.info(f"📊 Получено {len(blocked_users) if blocked_users else 0} заблокированных пользователей")
+        except Exception as db_error:
+            logger.error(
+                f"❌ Ошибка при получении заблокированных пользователей из БД: {db_error}",
+                exc_info=True
+            )
+            await callback.answer(
+                "❌ Ошибка загрузки данных из базы",
+                show_alert=True
+            )
+            return
+
+        if not blocked_users:
+            logger.info("ℹ️ Заблокированных пользователей не найдено")
+            await callback.answer(
+                "✅ Заблокированных пользователей нет",
+                show_alert=True
+            )
+            return
+
+        # Формируем текст со списком заблокированных пользователей
+        text = f"🚫 <b>Заблокированные пользователи</b> ({len(blocked_users)})\n\n"
+
+        for user in blocked_users:
+            username = f"@{user.get('username')}" if user.get('username') else "нет username"
+            reason = user.get('block_reason', 'не указана')
+
+            text += (
+                f"🚫 <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
+                f"   ID: <code>{user.get('telegram_id')}</code>\n"
+                f"   Причина: {reason}\n\n"
+            )
+
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=get_users_menu()  # Кнопка "Назад к управлению пользователями"
+        )
+        await callback.answer()
+        logger.info(f"✅ Список заблокированных пользователей отправлен администратору {callback.from_user.id}")
+
+    except Exception as e:
+        logger.error(
+            f"❌ Критическая ошибка в handle_users_blocked: {e}",
+            exc_info=True
+        )
+        await callback.answer("❌ Ошибка отображения списка", show_alert=True)
+
+
+@router.callback_query(F.data == "users_active")
+async def handle_users_active(callback: CallbackQuery):
+    """
+    Обработчик кнопки "Активные сегодня".
+
+    ИСПРАВЛЕНИЕ: Добавлен полностью отсутствующий обработчик.
+    Показывает пользователей, которые были активны сегодня.
+    """
+    try:
+        logger.info(f"✅ Пользователь {callback.from_user.id} запросил список активных сегодня пользователей")
+
+        try:
+            # Получаем всех пользователей
+            all_users = await get_all_users(limit=1000)
+            logger.info(f"📊 Получено {len(all_users) if all_users else 0} пользователей для фильтрации")
+
+            # Фильтруем пользователей, активных сегодня
+            from datetime import datetime, timedelta
+            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+            active_today = []
+            for user in all_users:
+                # Проверяем, была ли активность сегодня
+                last_activity = user.get('last_activity')
+                if last_activity:
+                    # Если last_activity - строка, парсим её
+                    if isinstance(last_activity, str):
+                        try:
+                            last_activity = datetime.fromisoformat(last_activity.replace('Z', '+00:00'))
+                        except:
+                            continue
+
+                    # Если активность была сегодня
+                    if last_activity >= today_start:
+                        active_today.append(user)
+
+            logger.info(f"📊 Найдено {len(active_today)} пользователей, активных сегодня")
+
+        except Exception as db_error:
+            logger.error(
+                f"❌ Ошибка при получении активных пользователей из БД: {db_error}",
+                exc_info=True
+            )
+            await callback.answer(
+                "❌ Ошибка загрузки данных из базы",
+                show_alert=True
+            )
+            return
+
+        if not active_today:
+            logger.info("ℹ️ Активных сегодня пользователей не найдено")
+            await callback.answer(
+                "ℹ️ Сегодня никто не был активен",
+                show_alert=True
+            )
+            return
+
+        # Формируем текст со списком активных пользователей
+        text = f"✅ <b>Активные сегодня</b> ({len(active_today)})\n\n"
+
+        for user in active_today[:50]:  # Показываем максимум 50 пользователей
+            username = f"@{user.get('username')}" if user.get('username') else "нет username"
+            last_activity = user.get('last_activity', 'неизвестно')
+
+            text += (
+                f"✅ <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
+                f"   ID: <code>{user.get('telegram_id')}</code>\n"
+                f"   Последняя активность: {last_activity}\n\n"
+            )
+
+        if len(active_today) > 50:
+            text += f"\n... и ещё {len(active_today) - 50} пользователей"
+
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=get_users_menu()  # Кнопка "Назад к управлению пользователями"
+        )
+        await callback.answer()
+        logger.info(f"✅ Список активных пользователей отправлен администратору {callback.from_user.id}")
+
+    except Exception as e:
+        logger.error(
+            f"❌ Критическая ошибка в handle_users_active: {e}",
+            exc_info=True
+        )
+        await callback.answer("❌ Ошибка отображения списка", show_alert=True)
+
+
+@router.callback_query(F.data == "users_new")
+async def handle_users_new(callback: CallbackQuery):
+    """
+    Обработчик кнопки "Новые пользователи".
+
+    ИСПРАВЛЕНИЕ: Добавлен полностью отсутствующий обработчик.
+    Показывает пользователей, зарегистрированных за последние 7 дней.
+    """
+    try:
+        logger.info(f"🆕 Пользователь {callback.from_user.id} запросил список новых пользователей")
+
+        try:
+            # Получаем всех пользователей
+            all_users = await get_all_users(limit=1000)
+            logger.info(f"📊 Получено {len(all_users) if all_users else 0} пользователей для фильтрации")
+
+            # Фильтруем новых пользователей (зарегистрированных за последние 7 дней)
+            from datetime import datetime, timedelta
+            week_ago = datetime.utcnow() - timedelta(days=7)
+
+            new_users = []
+            for user in all_users:
+                # Проверяем дату регистрации
+                registration_date = user.get('registration_date')
+                if registration_date:
+                    # Если registration_date - строка, парсим её
+                    if isinstance(registration_date, str):
+                        try:
+                            registration_date = datetime.fromisoformat(registration_date.replace('Z', '+00:00'))
+                        except:
+                            continue
+
+                    # Если регистрация была за последние 7 дней
+                    if registration_date >= week_ago:
+                        new_users.append(user)
+
+            logger.info(f"📊 Найдено {len(new_users)} новых пользователей за последние 7 дней")
+
+        except Exception as db_error:
+            logger.error(
+                f"❌ Ошибка при получении новых пользователей из БД: {db_error}",
+                exc_info=True
+            )
+            await callback.answer(
+                "❌ Ошибка загрузки данных из базы",
+                show_alert=True
+            )
+            return
+
+        if not new_users:
+            logger.info("ℹ️ Новых пользователей за последние 7 дней не найдено")
+            await callback.answer(
+                "ℹ️ За последние 7 дней новых пользователей нет",
+                show_alert=True
+            )
+            return
+
+        # Формируем текст со списком новых пользователей
+        text = f"🆕 <b>Новые пользователи</b> (за последние 7 дней: {len(new_users)})\n\n"
+
+        for user in new_users[:50]:  # Показываем максимум 50 пользователей
+            username = f"@{user.get('username')}" if user.get('username') else "нет username"
+            registration_date = user.get('registration_date', 'неизвестно')
+
+            text += (
+                f"🆕 <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
+                f"   ID: <code>{user.get('telegram_id')}</code>\n"
+                f"   Регистрация: {registration_date}\n\n"
+            )
+
+        if len(new_users) > 50:
+            text += f"\n... и ещё {len(new_users) - 50} пользователей"
+
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=get_users_menu()  # Кнопка "Назад к управлению пользователями"
+        )
+        await callback.answer()
+        logger.info(f"✅ Список новых пользователей отправлен администратору {callback.from_user.id}")
+
+    except Exception as e:
+        logger.error(
+            f"❌ Критическая ошибка в handle_users_new: {e}",
+            exc_info=True
+        )
+        await callback.answer("❌ Ошибка отображения списка", show_alert=True)
+
+
+@router.message(StateFilter(AdminStates.waiting_user_search))
+async def process_user_search(message: Message, state: FSMContext):
+    """
+    Обработчик ввода текста для поиска пользователя.
+
+    ИСПРАВЛЕНИЕ: Добавлен обработчик для обработки ввода при поиске пользователя.
+    Ищет пользователя по Telegram ID, username или имени.
+    """
+    try:
+        search_query = message.text.strip()
+        logger.info(f"🔍 Администратор {message.from_user.id} выполняет поиск: '{search_query}'")
+
+        # Возвращаем состояние в меню пользователей
+        await state.set_state(AdminStates.users_menu)
+
+        user_found = None
+
+        # Пытаемся найти по Telegram ID (если это число)
+        if search_query.isdigit():
+            try:
+                telegram_id = int(search_query)
+                user_found = await get_user_by_telegram_id(telegram_id)
+                logger.info(f"🔍 Поиск по Telegram ID {telegram_id}: {'найден' if user_found else 'не найден'}")
+            except Exception as search_error:
+                logger.error(f"❌ Ошибка при поиске по ID: {search_error}")
+
+        # Если не нашли по ID или это не число - ищем по username/имени
+        if not user_found:
+            try:
+                all_users = await get_all_users(limit=1000)
+
+                # Убираем @ из username если есть
+                search_clean = search_query.lstrip('@').lower()
+
+                for user in all_users:
+                    # Поиск по username
+                    if user.get('username') and user.get('username').lower() == search_clean:
+                        user_found = user
+                        logger.info(f"🔍 Найден пользователь по username: @{user.get('username')}")
+                        break
+
+                    # Поиск по имени
+                    if user.get('first_name') and search_query.lower() in user.get('first_name', '').lower():
+                        user_found = user
+                        logger.info(f"🔍 Найден пользователь по имени: {user.get('first_name')}")
+                        break
+
+            except Exception as search_error:
+                logger.error(f"❌ Ошибка при поиске пользователя: {search_error}", exc_info=True)
+                await message.answer(
+                    "❌ Ошибка поиска. Попробуйте ещё раз.",
+                    reply_markup=get_users_menu()
+                )
+                return
+
+        # Если пользователь не найден
+        if not user_found:
+            logger.info(f"ℹ️ Пользователь не найден по запросу: '{search_query}'")
+            await message.answer(
+                f"❌ Пользователь '<code>{search_query}</code>' не найден.\n\n"
+                "Попробуйте другой запрос или вернитесь в меню.",
+                reply_markup=get_users_menu()
+            )
+            return
+
+        # Формируем информацию о найденном пользователе
+        status_emoji = "🚫" if user_found.get('is_blocked') else "✅"
+        username = f"@{user_found.get('username')}" if user_found.get('username') else "нет username"
+
+        text = (
+            f"🔍 <b>Найден пользователь</b>\n\n"
+            f"{status_emoji} <b>{user_found.get('first_name', 'Без имени')} {user_found.get('last_name', '')}</b>\n"
+            f"Username: {username}\n"
+            f"Telegram ID: <code>{user_found.get('telegram_id')}</code>\n"
+            f"Регистрация: {user_found.get('registration_date', 'неизвестно')}\n"
+            f"Последняя активность: {user_found.get('last_activity', 'неизвестно')}\n"
+            f"Статус: {'Заблокирован' if user_found.get('is_blocked') else 'Активен'}\n"
+        )
+
+        if user_found.get('is_blocked') and user_found.get('block_reason'):
+            text += f"Причина блокировки: {user_found.get('block_reason')}\n"
+
+        await message.answer(
+            text=text,
+            reply_markup=get_users_menu()
+        )
+        logger.info(f"✅ Результаты поиска отправлены администратору {message.from_user.id}")
+
+    except Exception as e:
+        logger.error(
+            f"❌ Критическая ошибка в process_user_search: {e}",
+            exc_info=True
+        )
+        await message.answer(
+            "❌ Ошибка выполнения поиска",
+            reply_markup=get_users_menu()
+        )
+        # Возвращаем состояние в меню
+        await state.set_state(AdminStates.users_menu)
+
+
 @router.callback_query(F.data.startswith("user_block_"))
 async def block_user_action(callback: CallbackQuery):
     """Блокирует пользователя."""
     user_id = int(callback.data.replace("user_block_", ""))
-    
+
     success = await block_user(user_id)
-    
+
     if success:
         logger.info(f"🚫 Администратор {callback.from_user.id} заблокировал пользователя {user_id}")
         await callback.answer("✅ Пользователь заблокирован", show_alert=True)
