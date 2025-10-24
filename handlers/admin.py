@@ -894,25 +894,32 @@ async def handle_users_active(callback: CallbackQuery):
             all_users = await get_all_users(limit=1000)
             logger.info(f"📊 Получено {len(all_users) if all_users else 0} пользователей для фильтрации")
 
-            # Фильтруем пользователей, активных сегодня
+            # ИСПРАВЛЕНИЕ v2: Фильтруем пользователей, активных сегодня
+            # Теперь работаем с datetime объектами напрямую
             from datetime import datetime, timedelta
             today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
+            logger.info(f"🕐 Начало сегодняшнего дня (UTC): {today_start}")
+
             active_today = []
             for user in all_users:
-                # Проверяем, была ли активность сегодня
+                # ИСПРАВЛЕНИЕ: Теперь last_activity - это datetime объект, а не строка
                 last_activity = user.get('last_activity')
-                if last_activity:
-                    # Если last_activity - строка, парсим её
-                    if isinstance(last_activity, str):
-                        try:
-                            last_activity = datetime.fromisoformat(last_activity.replace('Z', '+00:00'))
-                        except:
-                            continue
 
-                    # Если активность была сегодня
+                # Логируем каждого пользователя для отладки
+                logger.debug(
+                    f"👤 Проверяем пользователя {user.get('telegram_id')}: "
+                    f"last_activity={last_activity}, type={type(last_activity)}"
+                )
+
+                if last_activity and isinstance(last_activity, datetime):
+                    # Сравниваем datetime объекты напрямую
                     if last_activity >= today_start:
                         active_today.append(user)
+                        logger.info(
+                            f"✅ Найден активный пользователь: {user.get('first_name')} "
+                            f"(ID: {user.get('telegram_id')}), активность: {last_activity}"
+                        )
 
             logger.info(f"📊 Найдено {len(active_today)} пользователей, активных сегодня")
 
@@ -940,7 +947,8 @@ async def handle_users_active(callback: CallbackQuery):
 
         for user in active_today[:50]:  # Показываем максимум 50 пользователей
             username = f"@{user.get('username')}" if user.get('username') else "нет username"
-            last_activity = user.get('last_activity', 'неизвестно')
+            # ИСПРАВЛЕНИЕ: Используем форматированную строку вместо datetime объекта
+            last_activity = user.get('last_activity_str', 'неизвестно')
 
             text += (
                 f"✅ <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
@@ -956,7 +964,7 @@ async def handle_users_active(callback: CallbackQuery):
             reply_markup=get_users_menu()  # Кнопка "Назад к управлению пользователями"
         )
         await callback.answer()
-        logger.info(f"✅ Список активных пользователей отправлен администратору {callback.from_user.id}")
+        logger.info(f"✅ Список активных пользователей ({len(active_today)}) отправлен администратору {callback.from_user.id}")
 
     except Exception as e:
         logger.error(
@@ -982,25 +990,32 @@ async def handle_users_new(callback: CallbackQuery):
             all_users = await get_all_users(limit=1000)
             logger.info(f"📊 Получено {len(all_users) if all_users else 0} пользователей для фильтрации")
 
-            # Фильтруем новых пользователей (зарегистрированных за последние 7 дней)
+            # ИСПРАВЛЕНИЕ v2: Фильтруем новых пользователей (зарегистрированных за последние 7 дней)
+            # Теперь работаем с datetime объектами напрямую
             from datetime import datetime, timedelta
             week_ago = datetime.utcnow() - timedelta(days=7)
 
+            logger.info(f"🕐 7 дней назад (UTC): {week_ago}")
+
             new_users = []
             for user in all_users:
-                # Проверяем дату регистрации
+                # ИСПРАВЛЕНИЕ: Теперь registration_date - это datetime объект, а не строка
                 registration_date = user.get('registration_date')
-                if registration_date:
-                    # Если registration_date - строка, парсим её
-                    if isinstance(registration_date, str):
-                        try:
-                            registration_date = datetime.fromisoformat(registration_date.replace('Z', '+00:00'))
-                        except:
-                            continue
 
-                    # Если регистрация была за последние 7 дней
+                # Логируем каждого пользователя для отладки
+                logger.debug(
+                    f"👤 Проверяем пользователя {user.get('telegram_id')}: "
+                    f"registration_date={registration_date}, type={type(registration_date)}"
+                )
+
+                if registration_date and isinstance(registration_date, datetime):
+                    # Сравниваем datetime объекты напрямую
                     if registration_date >= week_ago:
                         new_users.append(user)
+                        logger.info(
+                            f"🆕 Найден новый пользователь: {user.get('first_name')} "
+                            f"(ID: {user.get('telegram_id')}), регистрация: {registration_date}"
+                        )
 
             logger.info(f"📊 Найдено {len(new_users)} новых пользователей за последние 7 дней")
 
@@ -1028,7 +1043,8 @@ async def handle_users_new(callback: CallbackQuery):
 
         for user in new_users[:50]:  # Показываем максимум 50 пользователей
             username = f"@{user.get('username')}" if user.get('username') else "нет username"
-            registration_date = user.get('registration_date', 'неизвестно')
+            # ИСПРАВЛЕНИЕ: Используем форматированную строку вместо datetime объекта
+            registration_date = user.get('registration_date_str', 'неизвестно')
 
             text += (
                 f"🆕 <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
@@ -1044,7 +1060,7 @@ async def handle_users_new(callback: CallbackQuery):
             reply_markup=get_users_menu()  # Кнопка "Назад к управлению пользователями"
         )
         await callback.answer()
-        logger.info(f"✅ Список новых пользователей отправлен администратору {callback.from_user.id}")
+        logger.info(f"✅ Список новых пользователей ({len(new_users)}) отправлен администратору {callback.from_user.id}")
 
     except Exception as e:
         logger.error(
@@ -1123,13 +1139,14 @@ async def process_user_search(message: Message, state: FSMContext):
         status_emoji = "🚫" if user_found.get('is_blocked') else "✅"
         username = f"@{user_found.get('username')}" if user_found.get('username') else "нет username"
 
+        # ИСПРАВЛЕНИЕ: Используем форматированные строки для дат
         text = (
             f"🔍 <b>Найден пользователь</b>\n\n"
             f"{status_emoji} <b>{user_found.get('first_name', 'Без имени')} {user_found.get('last_name', '')}</b>\n"
             f"Username: {username}\n"
             f"Telegram ID: <code>{user_found.get('telegram_id')}</code>\n"
-            f"Регистрация: {user_found.get('registration_date', 'неизвестно')}\n"
-            f"Последняя активность: {user_found.get('last_activity', 'неизвестно')}\n"
+            f"Регистрация: {user_found.get('registration_date_str', 'неизвестно')}\n"
+            f"Последняя активность: {user_found.get('last_activity_str', 'неизвестно')}\n"
             f"Статус: {'Заблокирован' if user_found.get('is_blocked') else 'Активен'}\n"
         )
 

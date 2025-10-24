@@ -64,13 +64,15 @@ class UserCRUD:
                     if hasattr(user, key) and getattr(user, key) != value:
                         setattr(user, key, value)
                         updated = True
-                
-                # Обновляем время последней активности
+
+                # ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Обновляем время последней активности
+                # Проблема: last_activity обновлялась, но коммитилась только если updated=True
+                # Это приводило к тому, что при обычных действиях (клики) активность не сохранялась
                 user.last_activity = datetime.utcnow()
-                
-                if updated:
-                    await session.commit()
-                    await session.refresh(user)
+
+                # ИСПРАВЛЕНИЕ: Всегда коммитим, чтобы сохранить обновленное время last_activity
+                await session.commit()
+                await session.refresh(user)
             
             return user
             
@@ -652,7 +654,12 @@ class AdminLogCRUD:
 # standalone functions instead of CRUD classes.
 
 async def get_all_users(limit: int = 100) -> List[Dict]:
-    """Wrapper: Get all users as dict list"""
+    """Wrapper: Get all users as dict list
+
+    ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Добавлены поля last_activity и registration_date в полном формате.
+    Проблема: last_activity полностью отсутствовало, registration_date конвертировалось только в дату,
+    из-за чего фильтрация "Активные сегодня" и "Новые пользователи" всегда возвращала пустые списки.
+    """
     async for session in get_db_session():
         users = await UserCRUD.get_all_users(session, limit=limit)
         return [
@@ -663,7 +670,13 @@ async def get_all_users(limit: int = 100) -> List[Dict]:
                 "first_name": u.first_name,
                 "last_name": u.last_name,
                 "is_blocked": u.is_blocked,
-                "registration_date": u.registration_date.strftime("%d.%m.%Y") if u.registration_date else "неизвестно"
+                # ИСПРАВЛЕНИЕ: Возвращаем datetime объект для корректной фильтрации
+                "registration_date": u.registration_date,
+                # ИСПРАВЛЕНИЕ: Добавлено отсутствующее поле last_activity
+                "last_activity": u.last_activity,
+                # Для отображения в UI - форматированные строки
+                "registration_date_str": u.registration_date.strftime("%d.%m.%Y %H:%M") if u.registration_date else "неизвестно",
+                "last_activity_str": u.last_activity.strftime("%d.%m.%Y %H:%M") if u.last_activity else "неизвестно"
             }
             for u in users
         ]
@@ -671,7 +684,10 @@ async def get_all_users(limit: int = 100) -> List[Dict]:
 
 
 async def get_user_by_telegram_id(telegram_id: int) -> Optional[Dict]:
-    """Wrapper: Get user by telegram ID as dict"""
+    """Wrapper: Get user by telegram ID as dict
+
+    ИСПРАВЛЕНИЕ: Добавлены поля registration_date и last_activity для корректного отображения.
+    """
     async for session in get_db_session():
         user = await UserCRUD.get_user_by_telegram_id(session, telegram_id)
         if user:
@@ -682,7 +698,13 @@ async def get_user_by_telegram_id(telegram_id: int) -> Optional[Dict]:
                 "first_name": user.first_name,
                 "last_name": user.last_name,
                 "is_blocked": user.is_blocked,
-                "block_reason": user.block_reason
+                "block_reason": user.block_reason,
+                # ИСПРАВЛЕНИЕ: Добавлены datetime объекты
+                "registration_date": user.registration_date,
+                "last_activity": user.last_activity,
+                # Для отображения
+                "registration_date_str": user.registration_date.strftime("%d.%m.%Y %H:%M") if user.registration_date else "неизвестно",
+                "last_activity_str": user.last_activity.strftime("%d.%m.%Y %H:%M") if user.last_activity else "неизвестно"
             }
     return None
 
