@@ -20,6 +20,7 @@ from database.models import (
 # Это приводило к сбою всех обработчиков статистики и управления пользователями.
 from database.database import get_db_session
 from utils.logger import logger, log_database_operation
+from utils.timezone import format_msk_datetime, utc_to_msk
 import json
 
 
@@ -887,6 +888,7 @@ async def get_recent_activity(limit: int = 50) -> List[Dict]:
             result = await session.execute(stmt)
             rows = result.all()
 
+            # TIMEZONE: Конвертируем timestamp из UTC в московское время (МСК)
             return [
                 {
                     "id": activity.id,
@@ -898,7 +900,8 @@ async def get_recent_activity(limit: int = 50) -> List[Dict]:
                     "section": activity.section or "-",
                     "subsection": activity.subsection or "-",
                     "timestamp": activity.timestamp,
-                    "timestamp_str": activity.timestamp.strftime("%d.%m.%Y %H:%M:%S") if activity.timestamp else "-"
+                    # TIMEZONE: Время отображается в МСК для удобства пользователей
+                    "timestamp_str": format_msk_datetime(activity.timestamp) if activity.timestamp else "-"
                 }
                 for activity, user in rows
             ]
@@ -931,6 +934,7 @@ async def get_all_activity_for_export(days: int = 30) -> List[Dict]:
             result = await session.execute(stmt)
             rows = result.all()
 
+            # TIMEZONE: Конвертируем timestamp из UTC в московское время (МСК) для экспорта
             return [
                 {
                     "id": activity.id,
@@ -942,7 +946,8 @@ async def get_all_activity_for_export(days: int = 30) -> List[Dict]:
                     "section": activity.section or "",
                     "subsection": activity.subsection or "",
                     "callback_data": activity.callback_data or "",
-                    "timestamp": activity.timestamp.strftime("%d.%m.%Y %H:%M:%S") if activity.timestamp else ""
+                    # TIMEZONE: Время экспорта в МСК для удобства чтения администраторами
+                    "timestamp": format_msk_datetime(activity.timestamp) if activity.timestamp else ""
                 }
                 for activity, user in rows
             ]
@@ -999,22 +1004,28 @@ async def get_date_statistics(days: int = 30) -> Dict:
             # Подсчет по часам
             hourly_counts = defaultdict(int)
 
+            # TIMEZONE: Конвертируем все timestamp в московское время для корректной группировки
             for activity in activities:
                 if not activity.timestamp:
                     continue
 
-                # День недели
-                weekday = activity.timestamp.weekday()
+                # TIMEZONE: Конвертируем UTC -> МСК для правильного определения дня недели, даты и часа
+                msk_time = utc_to_msk(activity.timestamp)
+                if not msk_time:
+                    continue
+
+                # День недели (по московскому времени)
+                weekday = msk_time.weekday()
                 weekday_counts[weekday] += 1
                 weekday_users[weekday].add(activity.user_id)
 
-                # Конкретная дата
-                date_key = activity.timestamp.strftime("%Y-%m-%d")
+                # Конкретная дата (по московскому времени)
+                date_key = msk_time.strftime("%Y-%m-%d")
                 daily_counts[date_key] += 1
                 daily_users[date_key].add(activity.user_id)
 
-                # Час дня
-                hour = activity.timestamp.hour
+                # Час дня (по московскому времени)
+                hour = msk_time.hour
                 hourly_counts[hour] += 1
 
             # Формируем результат
@@ -1092,6 +1103,7 @@ async def get_users_for_export() -> List[Dict]:
                 logger.warning("⚠️ Нет пользователей для экспорта!")
                 return []
 
+            # TIMEZONE: Конвертируем все даты из UTC в московское время (МСК)
             users_list = [
                 {
                     "id": user.id,
@@ -1100,8 +1112,9 @@ async def get_users_for_export() -> List[Dict]:
                     "first_name": user.first_name or "",
                     "last_name": user.last_name or "",
                     "phone": user.phone or "",
-                    "registration_date": user.registration_date.strftime("%d.%m.%Y %H:%M:%S") if user.registration_date else "",
-                    "last_activity": user.last_activity.strftime("%d.%m.%Y %H:%M:%S") if user.last_activity else "",
+                    # TIMEZONE: Даты конвертируются из UTC в МСК для отображения
+                    "registration_date": format_msk_datetime(user.registration_date) if user.registration_date else "",
+                    "last_activity": format_msk_datetime(user.last_activity) if user.last_activity else "",
                     "is_blocked": "Да" if user.is_blocked else "Нет",
                     "is_admin": "Да" if user.is_admin else "Нет"
                 }
