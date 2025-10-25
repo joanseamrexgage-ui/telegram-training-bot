@@ -115,6 +115,10 @@ def sanitize_username(username: Optional[str]) -> str:
     if not username:
         return "anonymous"
 
+    # Check for whitespace-only strings
+    if username.strip() == "":
+        return "anonymous"
+
     # Remove @ prefix if present
     if username.startswith("@"):
         username = username[1:]
@@ -125,7 +129,10 @@ def sanitize_username(username: Optional[str]) -> str:
     # Limit length
     username = username[:32]
 
-    return username or "anonymous"
+    # Remove leading/trailing underscores and check if anything remains
+    cleaned = username.strip('_')
+
+    return cleaned or "anonymous"
 
 
 def sanitize_broadcast_message(text: str, max_length: int = 4096) -> str:
@@ -174,7 +181,12 @@ def validate_telegram_id(telegram_id: any) -> bool:
         False
     """
     try:
+        # Reject floats - must be actual integers
+        if isinstance(telegram_id, float):
+            return False
+
         user_id = int(telegram_id)
+
         # Telegram IDs are positive and up to 10 digits
         return 0 < user_id < 10_000_000_000
     except (ValueError, TypeError):
@@ -203,11 +215,19 @@ def sanitize_search_query(query: str) -> str:
     if not query:
         return ""
 
+    # Remove path traversal sequences
+    query = query.replace("../", "").replace("..\\", "")
+
     # Remove potentially dangerous SQL characters
     # (Even though we use ORM, defense in depth)
     dangerous_chars = ["'", '"', ";", "--", "/*", "*/", "\\"]
     for char in dangerous_chars:
         query = query.replace(char, " ")
+
+    # Remove shell command special characters
+    shell_chars = ["<", ">", "|", "&", "$", "`"]
+    for char in shell_chars:
+        query = query.replace(char, "")
 
     # Limit length
     query = query[:255]

@@ -480,7 +480,7 @@ class TestDataProtection:
         assert bcrypt.checkpw(plain_password.encode(), hashed)
 
 
-class TestAPISecurityimport time
+class TestAPISecurity:
     """Test API security measures"""
 
     @pytest.mark.asyncio
