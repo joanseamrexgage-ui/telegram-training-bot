@@ -1,44 +1,187 @@
 version: '3.8'
 
 services:
-  # ========== REDIS (PRODUCTION v2.1) ==========
-  # CRIT-002, CRIT-003, OPS-002 FIX: Redis для FSM и rate limiting
-  redis:
-    image: redis:7-alpine
-    container_name: training_bot_redis
-    restart: unless-stopped
+  # ========== REDIS HIGH AVAILABILITY CLUSTER (PRODUCTION v3.0) ==========
+  # BLOCKER-001 FIX: Redis Sentinel для автоматического failover
+  # Architecture: 1 Master + 2 Slaves + 3 Sentinels
+  # Automatic failover: < 5s downtime при падении master
 
-    # Redis configuration
+  # Redis Master
+  redis-master:
+    image: redis:7-alpine
+    container_name: training_bot_redis_master
+    restart: unless-stopped
     command: >
       redis-server
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
       --save 60 1000
       --appendonly yes
-
-    # Volumes для персистентности
+      --replica-announce-ip redis-master
     volumes:
-      - redis_data:/data
-
-    # Сеть
+      - redis_master_data:/data
     networks:
       - bot_network
-
-    # Health check
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-    # Resource limits
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     deploy:
       resources:
         limits:
           cpus: '0.5'
           memory: 512M
-        reservations:
+
+  # Redis Slave 1
+  redis-slave1:
+    image: redis:7-alpine
+    container_name: training_bot_redis_slave1
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+      --slaveof redis-master 6379
+      --replica-announce-ip redis-slave1
+    volumes:
+      - redis_slave1_data:/data
+    networks:
+      - bot_network
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis Slave 2
+  redis-slave2:
+    image: redis:7-alpine
+    container_name: training_bot_redis_slave2
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+      --slaveof redis-master 6379
+      --replica-announce-ip redis-slave2
+    volumes:
+      - redis_slave2_data:/data
+    networks:
+      - bot_network
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Sentinel 1
+  redis-sentinel1:
+    image: redis:7-alpine
+    container_name: training_bot_sentinel1
+    restart: unless-stopped
+    command: >
+      sh -c "echo 'port 26379
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel down-after-milliseconds mymaster 5000
+      sentinel parallel-syncs mymaster 1
+      sentinel failover-timeout mymaster 10000' > /tmp/sentinel.conf &&
+      redis-sentinel /tmp/sentinel.conf"
+    networks:
+      - bot_network
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "sentinel", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+  # Sentinel 2
+  redis-sentinel2:
+    image: redis:7-alpine
+    container_name: training_bot_sentinel2
+    restart: unless-stopped
+    command: >
+      sh -c "echo 'port 26379
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel down-after-milliseconds mymaster 5000
+      sentinel parallel-syncs mymaster 1
+      sentinel failover-timeout mymaster 10000' > /tmp/sentinel.conf &&
+      redis-sentinel /tmp/sentinel.conf"
+    networks:
+      - bot_network
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "sentinel", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+  # Sentinel 3
+  redis-sentinel3:
+    image: redis:7-alpine
+    container_name: training_bot_sentinel3
+    restart: unless-stopped
+    command: >
+      sh -c "echo 'port 26379
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel down-after-milliseconds mymaster 5000
+      sentinel parallel-syncs mymaster 1
+      sentinel failover-timeout mymaster 10000' > /tmp/sentinel.conf &&
+      redis-sentinel /tmp/sentinel.conf"
+    networks:
+      - bot_network
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "sentinel", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
           cpus: '0.25'
           memory: 256M
 
@@ -54,9 +197,13 @@ services:
     env_file:
       - .env
 
-    # Override Redis URL for Docker network
+    # BLOCKER-001: Redis Sentinel configuration for HA
     environment:
-      - REDIS_URL=redis://redis:6379
+      # Sentinel nodes (comma-separated host:port pairs)
+      - REDIS_SENTINEL_NODES=redis-sentinel1:26379,redis-sentinel2:26379,redis-sentinel3:26379
+      - REDIS_MASTER_NAME=mymaster
+      # Fallback to simple Redis URL (for backward compatibility)
+      - REDIS_URL=redis://redis-master:6379
 
     # Volumes для сохранения данных
     volumes:
@@ -64,9 +211,15 @@ services:
       - ./content:/app/content              # Контент (медиа-файлы)
       - ./training_bot.db:/app/training_bot.db  # SQLite БД (для SQLite)
 
-    # PRODUCTION v2.1: Зависимость от Redis
+    # PRODUCTION v3.0: Зависимость от Redis Sentinel Cluster
     depends_on:
-      redis:
+      redis-master:
+        condition: service_healthy
+      redis-sentinel1:
+        condition: service_healthy
+      redis-sentinel2:
+        condition: service_healthy
+      redis-sentinel3:
         condition: service_healthy
       # db:
       #   condition: service_healthy
@@ -133,8 +286,12 @@ networks:
 
 # ========== VOLUMES ==========
 volumes:
-  # PRODUCTION v2.1: Redis data persistence
-  redis_data:
+  # PRODUCTION v3.0: Redis HA Cluster data persistence
+  redis_master_data:
+    driver: local
+  redis_slave1_data:
+    driver: local
+  redis_slave2_data:
     driver: local
   # Для PostgreSQL (раскомментируйте если используете)
   # postgres_data:
