@@ -16,6 +16,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage, DefaultKeyBuilder
+from redis.asyncio import Redis
 
 # Добавляем корневую директорию проекта в путь для импорта
 sys.path.insert(0, str(Path(__file__).parent))
@@ -24,8 +26,8 @@ from config import load_config
 from database.database import init_db, close_db
 from handlers import start, general_info, sales, sport, admin, common
 from middlewares.auth import AuthMiddleware
-from middlewares.logging import LoggingMiddleware
-from middlewares.throttling import ThrottlingMiddleware
+from middlewares.logging_v2 import AsyncLoggingMiddleware  # CRIT-004 FIX: v2.0
+from middlewares.throttling_v2 import create_redis_throttling, RateLimitConfig  # CRIT-002 FIX: v2.0
 from middlewares.errors import ErrorHandlingMiddleware  # VERSION 2.0
 from utils.logger import logger
 # PRODUCTION MONITORING: Sentry integration for error tracking
@@ -64,13 +66,17 @@ async def main():
         sys.exit(1)
     
     # Инициализируем базу данных
-    # CRIT-002 FIX: Always pass config vars to init_db()
+    # ARCH-003 FIX: Connection pooling configuration
     try:
         await init_db(
             database_url=config.db.url,
-            echo=config.db.echo
+            echo=config.db.echo,
+            pool_size=config.db.pool_size,
+            max_overflow=config.db.max_overflow,
+            pool_timeout=config.db.pool_timeout,
+            pool_recycle=config.db.pool_recycle
         )
-        logger.info("✅ База данных инициализирована")
+        logger.info("✅ База данных инициализирована с connection pooling")
     except Exception as e:
         logger.critical(f"❌ Ошибка инициализации базы данных: {e}")
         sys.exit(1)
@@ -79,32 +85,79 @@ async def main():
     bot = Bot(
         token=config.tg_bot.token,
         default=DefaultBotProperties(
-            parse_mode=ParseMode.HTML  # Используем HTML для форматирования
+            parse_mode=ParseMode.HTML  # Используем HTML для форматирование
         )
     )
-    
-    # Создаем диспетчер с FSM хранилищем в памяти
-    dp = Dispatcher(storage=MemoryStorage())
-    
-    # Регистрируем middlewares (порядок важен!)
-    # 1. Throttling - защита от спама (первым, чтобы блокировать раньше)
-    # ОТКЛЮЧЕНО: Убрана логика ограничения частоты кликов по запросу пользователя
-    # dp.message.middleware(ThrottlingMiddleware())
-    # dp.callback_query.middleware(ThrottlingMiddleware())
 
-    # 2. Auth - авторизация и сохранение пользователей
+    # CRIT-003 FIX: Redis FSM Storage для multi-instance support
+    try:
+        redis_fsm = Redis.from_url(
+            f"{config.redis.url}/{config.redis.fsm_db}",
+            decode_responses=True
+        )
+        # Test connection
+        await redis_fsm.ping()
+
+        storage = RedisStorage(
+            redis=redis_fsm,
+            key_builder=DefaultKeyBuilder(with_destiny=True)
+        )
+        logger.info(f"✅ Redis FSM Storage инициализирован: {config.redis.url}/{config.redis.fsm_db}")
+    except Exception as e:
+        logger.error(
+            f"⚠️ Redis недоступен: {e}\n"
+            f"   Fallback на MemoryStorage (состояния будут теряться при рестарте!)"
+        )
+        storage = MemoryStorage()
+
+    # Создаем диспетчер с Redis FSM хранилищем
+    dp = Dispatcher(storage=storage)
+    
+    # ARCH-001: КРИТИЧЕСКИЙ ПОРЯДОК MIDDLEWARES
+    # ========================================
+    # Порядок выполнения КРИТИЧЕСКИ ВАЖЕН для безопасности и производительности!
+    #
+    # Execution Order (outer → inner):
+    # 1. Throttling    → Блокирует спам ДО любой обработки (защита ресурсов)
+    # 2. Auth          → Аутентифицирует пользователя (требует DB)
+    # 3. ErrorHandling → Ловит ошибки из handlers и внутренних middleware
+    # 4. Logging       → Логирует УСПЕШНЫЕ запросы (после всех проверок)
+    #
+    # НИКОГДА НЕ МЕНЯЙТЕ ПОРЯДОК БЕЗ ПОЛНОГО ПОНИМАНИЯ ПОСЛЕДСТВИЙ!
+    # См. tests/test_middleware_order.py для автоматической проверки
+
+    # 1. CRIT-002 & SEC-002 FIX: Redis Token Bucket Throttling
+    try:
+        throttling_middleware = await create_redis_throttling(
+            redis_url=f"{config.redis.url}/{config.redis.throttle_db}",
+            max_tokens=5,        # Burst capacity: 5 requests
+            refill_rate=0.5,     # Sustained: 1 req per 2 seconds
+            violation_threshold=3,
+            block_duration=60
+        )
+        dp.message.middleware(throttling_middleware)
+        dp.callback_query.middleware(throttling_middleware)
+        logger.info("✅ Redis Throttling Middleware активирован")
+    except Exception as e:
+        logger.error(
+            f"⚠️ Throttling Middleware НЕДОСТУПЕН: {e}\n"
+            f"   Бот НЕ защищен от спама!"
+        )
+
+    # 2. Auth Middleware - авторизация пользователей
     dp.message.middleware(AuthMiddleware())
     dp.callback_query.middleware(AuthMiddleware())
 
-    # 3. Error Handling - глобальная обработка ошибок (VERSION 2.0)
+    # 3. Error Handling Middleware - обработка ошибок
     dp.message.middleware(ErrorHandlingMiddleware())
     dp.callback_query.middleware(ErrorHandlingMiddleware())
 
-    # 4. Logging - логирование действий (последним, чтобы логировать все)
-    dp.message.middleware(LoggingMiddleware())
-    dp.callback_query.middleware(LoggingMiddleware())
+    # 4. CRIT-004 FIX: Async Logging Middleware (non-blocking)
+    async_logging = AsyncLoggingMiddleware(enable_performance_tracking=True)
+    dp.message.middleware(async_logging)
+    dp.callback_query.middleware(async_logging)
 
-    logger.info("✅ Middlewares зарегистрированы")
+    logger.info("✅ All Production Middlewares зарегистрированы (v2.1)")
     
     # Регистрируем handlers
     # Порядок регистрации определяет приоритет обработки

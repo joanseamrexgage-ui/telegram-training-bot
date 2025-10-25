@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-Скрипт для генерации SHA-256 хеша пароля администратора
+Production-Ready Admin Password Hash Generator v2.0
+
+SEC-001 FIX: bcrypt с солью вместо SHA-256
 
 Использование:
     python generate_admin_hash.py
@@ -9,35 +11,47 @@
     make generate-hash
 """
 
-import hashlib
 import sys
+
+try:
+    import bcrypt
+except ImportError:
+    print("❌ ERROR: bcrypt not installed!")
+    print("Run: pip install bcrypt")
+    sys.exit(1)
 
 
 def generate_password_hash(password: str) -> str:
     """
-    Генерирует SHA-256 хеш пароля
+    Генерирует bcrypt хеш пароля с солью
+
+    SEC-001 FIX: bcrypt вместо SHA-256 для безопасности
 
     Args:
         password: Пароль в открытом виде
 
     Returns:
-        Hex-строка с хешем пароля
+        bcrypt хеш с солью (decoded string)
     """
-    return hashlib.sha256(password.encode()).hexdigest()
+    # Generate salt and hash
+    salt = bcrypt.gensalt(rounds=12)  # 12 rounds = good security/performance balance
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
 
 
 def main():
     print("=" * 60)
-    print("ГЕНЕРАТОР ХЕША ПАРОЛЯ АДМИНИСТРАТОРА")
+    print("PRODUCTION PASSWORD HASH GENERATOR v2.0")
     print("=" * 60)
     print()
-    print("Этот скрипт создаст SHA-256 хеш для вашего админ-пароля.")
+    print("SEC-001 FIX: Использует bcrypt с солью (безопаснее SHA-256)")
     print("Хеш нужно добавить в .env файл как ADMIN_PASS_HASH")
     print()
     print("⚠️  ВАЖНО:")
-    print("  - Используйте сложный пароль (минимум 12 символов)")
+    print("  - Используйте СЛОЖНЫЙ пароль (минимум 12 символов)")
     print("  - Включите буквы, цифры и спецсимволы")
     print("  - Не используйте стандартные пароли")
+    print("  - bcrypt автоматически добавляет уникальную соль")
     print()
     print("-" * 60)
 
@@ -70,11 +84,16 @@ def main():
 
         print()
         print("=" * 60)
-        print("✅ ХЕШ УСПЕШНО СГЕНЕРИРОВАН")
+        print("✅ BCRYPT ХЕШ УСПЕШНО СГЕНЕРИРОВАН")
         print("=" * 60)
         print()
         print(f"Ваш пароль: {password}")
-        print(f"SHA-256 хеш: {password_hash}")
+        print(f"bcrypt хеш: {password_hash}")
+        print()
+        print("ℹ️  Информация о хеше:")
+        print(f"   - Алгоритм: bcrypt (с уникальной солью)")
+        print(f"   - Длина: {len(password_hash)} символов")
+        print(f"   - Rounds: 12 (баланс безопасности/производительности)")
         print()
         print("-" * 60)
         print("ИНСТРУКЦИЯ:")
@@ -89,7 +108,10 @@ def main():
         print()
         print("4. Перезапустите бота")
         print()
-        print("⚠️  НЕ ХРАНИТЕ ЭТО СООБЩЕНИЕ И НЕ КОММИТЬТЕ .env В GIT!")
+        print("⚠️  SECURITY WARNING:")
+        print("  - НЕ ХРАНИТЕ этот вывод в логах или истории команд")
+        print("  - НЕ КОММИТЬТЕ .env в Git")
+        print("  - УДАЛИТЕ хеш из терминала после копирования")
         print("=" * 60)
 
     except KeyboardInterrupt:

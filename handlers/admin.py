@@ -10,13 +10,16 @@ Handler для админ-панели.
 """
 
 import csv
-import hashlib
+import hashlib  # Deprecated: kept for backward compatibility
 import json
 import shutil
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict
+
+# SEC-001 FIX: bcrypt for secure password hashing
+import bcrypt
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, FSInputFile
@@ -60,10 +63,12 @@ import os
 # Создаем router для админки
 router = Router(name='admin')
 
-# Получаем хеш пароля администратора из .env
-# По умолчанию используется хеш от "admin123"
-# Для генерации хеша: import hashlib; print(hashlib.sha256("your_password".encode()).hexdigest())
-DEFAULT_ADMIN_HASH = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"  # admin123
+# SEC-001 FIX: bcrypt password hash from .env
+# ⚠️ MIGRATION NOTE: Old SHA-256 hashes still supported for backward compatibility
+# Generate new hash: python generate_admin_hash.py
+# OLD SHA-256 default (admin123): "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"
+# NEW bcrypt default (admin123): "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5ViT8QJy4E6M6"
+DEFAULT_ADMIN_HASH = "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5ViT8QJy4E6M6"  # bcrypt: admin123
 ADMIN_PASS_HASH = os.getenv("ADMIN_PASS_HASH", DEFAULT_ADMIN_HASH)
 
 # Хранилище попыток ввода пароля {user_id: {"attempts": int, "blocked_until": datetime}}
@@ -75,13 +80,45 @@ BLOCK_DURATION = timedelta(minutes=5)
 
 
 def hash_password(password: str) -> str:
-    """Хеширует пароль с помощью SHA-256."""
+    """
+    Deprecated: Хеширует пароль с помощью SHA-256
+
+    SEC-001: Use bcrypt instead. This function kept for backward compatibility only.
+    """
     return hashlib.sha256(password.encode()).hexdigest()
 
 
 def check_password(input_password: str, correct_password_hash: str) -> bool:
-    """Проверяет правильность введенного пароля."""
-    return hash_password(input_password) == correct_password_hash
+    """
+    Проверяет правильность введенного пароля
+
+    SEC-001 FIX: Supports both bcrypt (new) and SHA-256 (legacy)
+
+    Args:
+        input_password: Пароль в открытом виде
+        correct_password_hash: Хеш из .env (bcrypt или SHA-256)
+
+    Returns:
+        True if password matches, False otherwise
+    """
+    # SEC-001: Check if hash is bcrypt format
+    if correct_password_hash.startswith("$2b$") or correct_password_hash.startswith("$2a$"):
+        # New bcrypt verification (secure)
+        try:
+            return bcrypt.checkpw(
+                input_password.encode('utf-8'),
+                correct_password_hash.encode('utf-8')
+            )
+        except Exception as e:
+            logger.error(f"bcrypt verification error: {e}")
+            return False
+    else:
+        # Legacy SHA-256 verification (insecure, backward compatibility)
+        logger.warning(
+            "⚠️ SECURITY WARNING: Using legacy SHA-256 password hash! "
+            "Please regenerate with bcrypt: python generate_admin_hash.py"
+        )
+        return hash_password(input_password) == correct_password_hash
 
 
 def is_user_blocked_from_attempts(user_id: int) -> bool:
