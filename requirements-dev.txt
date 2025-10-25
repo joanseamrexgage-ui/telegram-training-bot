@@ -1,0 +1,20 @@
+# Development and CI/CD Dependencies
+# Code Quality & Linting
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.0.0
+flake8-docstrings>=1.7.0
+flake8-bugbear>=23.0.0
+mypy>=1.0.0
+pylint>=3.0.0
+
+# Security Scanning
+bandit>=1.7.5
+safety>=2.3.5
+
+# Testing (additional tools not in main requirements)
+pytest-timeout>=2.0.0
+pytest-xdist>=3.0.0
+
+# Pre-commit hooks
+pre-commit>=3.0.0
