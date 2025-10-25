@@ -58,6 +58,17 @@ from database.crud import (
 # CRIT-005 FIX: Don't load config globally
 from utils.logger import logger
 from utils.timezone import get_msk_now, format_msk_datetime
+# BLOCKER-002 FIX: Redis-backed password attempt tracking
+from utils.auth_security import get_auth_security, MAX_ATTEMPTS, BLOCK_DURATION_MINUTES
+# HIGH-003 FIX: Input sanitization and HTML escaping
+from utils.sanitize import (
+    sanitize_user_input,
+    sanitize_username,
+    sanitize_broadcast_message,
+    sanitize_search_query,
+    safe_user_name,
+    safe_username
+)
 import os
 
 # Создаем router для админки
@@ -71,12 +82,11 @@ router = Router(name='admin')
 DEFAULT_ADMIN_HASH = "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5ViT8QJy4E6M6"  # bcrypt: admin123
 ADMIN_PASS_HASH = os.getenv("ADMIN_PASS_HASH", DEFAULT_ADMIN_HASH)
 
-# Хранилище попыток ввода пароля {user_id: {"attempts": int, "blocked_until": datetime}}
-password_attempts: Dict[int, dict] = {}
-
-# Максимум попыток и время блокировки
-MAX_ATTEMPTS = 3
-BLOCK_DURATION = timedelta(minutes=5)
+# BLOCKER-002 FIX: Password attempts now tracked in Redis via utils.auth_security
+# Removed in-memory password_attempts dict - now persists across bot restarts
+# Maximum attempts and block duration configured in utils.auth_security:
+# - MAX_ATTEMPTS = 3
+# - BLOCK_DURATION_MINUTES = 5
 
 
 def hash_password(password: str) -> str:
@@ -121,52 +131,58 @@ def check_password(input_password: str, correct_password_hash: str) -> bool:
         return hash_password(input_password) == correct_password_hash
 
 
-def is_user_blocked_from_attempts(user_id: int) -> bool:
+# BLOCKER-002 FIX: Redis-backed password attempt tracking
+# These functions now use utils.auth_security for persistent storage
+
+
+async def is_user_blocked_from_attempts(user_id: int) -> tuple[bool, datetime | None]:
     """
     Проверяет, заблокирован ли пользователь из-за неверных попыток.
 
-    TIMEZONE: Использует московское время для проверки блокировки
+    BLOCKER-002 FIX: Now uses Redis-backed storage (persists across restarts)
+
+    Returns:
+        Tuple of (is_blocked, blocked_until_datetime)
     """
-    if user_id not in password_attempts:
-        return False
+    auth_security = get_auth_security()
+    if not auth_security:
+        logger.error("❌ AuthSecurity not initialized, blocking access as safety measure")
+        return True, None
 
-    blocked_until = password_attempts[user_id].get("blocked_until")
-    # TIMEZONE: Сравниваем с московским временем
-    if blocked_until and get_msk_now() < blocked_until:
-        return True
-
-    # Если время блокировки прошло, сбрасываем счетчик
-    if blocked_until and get_msk_now() >= blocked_until:
-        password_attempts[user_id] = {"attempts": 0, "blocked_until": None}
-
-    return False
+    is_blocked, blocked_until = await auth_security.is_user_blocked(user_id)
+    return is_blocked, blocked_until
 
 
-def increment_password_attempts(user_id: int) -> tuple[int, datetime | None]:
+async def increment_password_attempts(user_id: int) -> tuple[int, datetime | None]:
     """
     Увеличивает счетчик попыток ввода пароля.
-    Возвращает (количество_попыток, время_блокировки).
+
+    BLOCKER-002 FIX: Now uses Redis-backed storage (persists across restarts)
+
+    Returns:
+        Tuple of (attempt_count, blocked_until_datetime)
     """
-    if user_id not in password_attempts:
-        password_attempts[user_id] = {"attempts": 0, "blocked_until": None}
-    
-    password_attempts[user_id]["attempts"] += 1
-    attempts = password_attempts[user_id]["attempts"]
-    
-    # Если превышено количество попыток
-    if attempts >= MAX_ATTEMPTS:
-        blocked_until = datetime.now() + BLOCK_DURATION
-        password_attempts[user_id]["blocked_until"] = blocked_until
-        logger.warning(f"⚠️ Пользователь {user_id} заблокирован до {blocked_until} из-за неверного пароля")
-        return attempts, blocked_until
-    
-    return attempts, None
+    auth_security = get_auth_security()
+    if not auth_security:
+        logger.error("❌ AuthSecurity not initialized, cannot track attempts")
+        return 0, None
+
+    attempts, blocked_until = await auth_security.increment_password_attempts(user_id)
+    return attempts, blocked_until
 
 
-def reset_password_attempts(user_id: int):
-    """Сбрасывает счетчик попыток при успешной авторизации."""
-    if user_id in password_attempts:
-        password_attempts[user_id] = {"attempts": 0, "blocked_until": None}
+async def reset_password_attempts(user_id: int):
+    """
+    Сбрасывает счетчик попыток при успешной авторизации.
+
+    BLOCKER-002 FIX: Now uses Redis-backed storage (persists across restarts)
+    """
+    auth_security = get_auth_security()
+    if not auth_security:
+        logger.error("❌ AuthSecurity not initialized, cannot reset attempts")
+        return
+
+    await auth_security.reset_password_attempts(user_id)
 
 
 # ========== АВТОРИЗАЦИЯ ==========
@@ -175,27 +191,27 @@ def reset_password_attempts(user_id: int):
 async def request_admin_password(callback: CallbackQuery, state: FSMContext):
     """Запрашивает пароль для входа в админку."""
     user_id = callback.from_user.id
-    
-    # Проверяем блокировку
-    if is_user_blocked_from_attempts(user_id):
-        blocked_until = password_attempts[user_id]["blocked_until"]
-        minutes_left = int((blocked_until - datetime.now()).total_seconds() / 60)
-        
+
+    # BLOCKER-002 FIX: Check Redis-backed block status
+    is_blocked, blocked_until = await is_user_blocked_from_attempts(user_id)
+    if is_blocked and blocked_until:
+        minutes_left = int((blocked_until - datetime.utcnow()).total_seconds() / 60)
+
         await callback.answer(
             f"🚫 Превышено количество попыток!\n"
             f"Попробуйте через {minutes_left} минут.",
             show_alert=True
         )
         return
-    
+
     await state.set_state(AdminStates.waiting_for_password)
-    
+
     text = (
         "🔐 <b>Вход в админ-панель</b>\n\n"
         "Для доступа к админ-панели введите пароль.\n\n"
         "⚠️ Внимание:\n"
         f"• Максимум {MAX_ATTEMPTS} попытки\n"
-        f"• При превышении - блокировка на {BLOCK_DURATION.seconds // 60} минут\n"
+        f"• При превышении - блокировка на {BLOCK_DURATION_MINUTES} минут\n"
         "• Все попытки логируются\n\n"
         "Введите пароль:"
     )
@@ -271,32 +287,32 @@ async def process_admin_password(message: Message, state: FSMContext):
     """Обрабатывает введенный пароль."""
     user_id = message.from_user.id
     input_password = message.text.strip()
-    
+
     # Удаляем сообщение с паролем для безопасности
     try:
         await message.delete()
     except Exception:
         pass
-    
-    # Проверяем блокировку
-    if is_user_blocked_from_attempts(user_id):
-        blocked_until = password_attempts[user_id]["blocked_until"]
-        minutes_left = int((blocked_until - datetime.now()).total_seconds() / 60)
-        
+
+    # BLOCKER-002 FIX: Check Redis-backed block status
+    is_blocked, blocked_until = await is_user_blocked_from_attempts(user_id)
+    if is_blocked and blocked_until:
+        minutes_left = int((blocked_until - datetime.utcnow()).total_seconds() / 60)
+
         await message.answer(
             f"🚫 Вы заблокированы из-за множественных неверных попыток.\n"
             f"Попробуйте через {minutes_left} минут."
         )
         return
-    
+
     # Проверяем пароль
     # Сравниваем хеш введенного пароля с хешем из .env
     if check_password(input_password, ADMIN_PASS_HASH):
         # ИСПРАВЛЕНИЕ КРИТИЧЕСКОЙ ОШИБКИ: Добавлен try-except блок для обработки ошибок
         # Ранее при любой ошибке в show_admin_panel пользователь получал необработанное исключение
         try:
-            # Пароль верный
-            reset_password_attempts(user_id)
+            # BLOCKER-002 FIX: Reset attempts in Redis
+            await reset_password_attempts(user_id)
             await state.set_state(AdminStates.authorized)
 
             logger.info(f"✅ Пользователь {user_id} (@{message.from_user.username}) успешно авторизован в админке")
@@ -325,14 +341,14 @@ async def process_admin_password(message: Message, state: FSMContext):
             # Сбрасываем состояние при ошибке
             await state.clear()
     else:
-        # Пароль неверный
-        attempts, blocked_until = increment_password_attempts(user_id)
-        
+        # BLOCKER-002 FIX: Increment attempts in Redis
+        attempts, blocked_until = await increment_password_attempts(user_id)
+
         logger.warning(
             f"⚠️ Неверный пароль от {user_id} ({message.from_user.username}). "
             f"Попытка {attempts}/{MAX_ATTEMPTS}"
         )
-        
+
         if blocked_until:
             await message.answer(
                 f"❌ <b>Неверный пароль!</b>\n\n"
@@ -375,9 +391,12 @@ async def show_admin_panel(message: Message, state: FSMContext):
                 'new_this_week': 0
             }
 
+        # HIGH-003 FIX: Sanitize admin name
+        admin_name = safe_user_name(message.from_user)
+
         text = (
             "🔒 <b>Админ-панель</b>\n\n"
-            f"👤 Администратор: {message.from_user.full_name}\n"
+            f"👤 Администратор: {admin_name}\n"
             # TIMEZONE: Используем московское время для отображения
             f"🕐 Вход: {get_msk_now().strftime('%d.%m.%Y %H:%M')} (МСК)\n\n"
             f"📊 <b>Быстрая статистика:</b>\n"
@@ -1032,10 +1051,17 @@ async def show_users_list(callback: CallbackQuery):
 
         for user in page_users:
             status = "🚫" if user.get('is_blocked') else "✅"
-            username = f"@{user.get('username')}" if user.get('username') else "нет username"
+
+            # HIGH-003 FIX: Sanitize user data before display
+            first_name = sanitize_user_input(user.get('first_name') or 'Без имени', max_length=50)
+            username_raw = user.get('username')
+            if username_raw:
+                username = f"@{sanitize_username(username_raw)}"
+            else:
+                username = "нет username"
 
             text += (
-                f"{status} <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
+                f"{status} <b>{first_name}</b> ({username})\n"
                 f"   ID: <code>{user.get('telegram_id')}</code>\n"
                 f"   Регистрация: {user.get('registration_date_str', 'неизвестно')}\n\n"
             )
@@ -1113,10 +1139,17 @@ async def handle_users_list_pagination(callback: CallbackQuery):
 
         for user in page_users:
             status = "🚫" if user.get('is_blocked') else "✅"
-            username = f"@{user.get('username')}" if user.get('username') else "нет username"
+
+            # HIGH-003 FIX: Sanitize user data before display
+            first_name = sanitize_user_input(user.get('first_name') or 'Без имени', max_length=50)
+            username_raw = user.get('username')
+            if username_raw:
+                username = f"@{sanitize_username(username_raw)}"
+            else:
+                username = "нет username"
 
             text += (
-                f"{status} <b>{user.get('first_name', 'Без имени')}</b> ({username})\n"
+                f"{status} <b>{first_name}</b> ({username})\n"
                 f"   ID: <code>{user.get('telegram_id')}</code>\n"
                 f"   Регистрация: {user.get('registration_date_str', 'неизвестно')}\n\n"
             )
@@ -1444,7 +1477,8 @@ async def process_user_search(message: Message, state: FSMContext):
     Ищет пользователя по Telegram ID, username или имени.
     """
     try:
-        search_query = message.text.strip()
+        # HIGH-003 FIX: Sanitize search query to prevent injection attacks
+        search_query = sanitize_search_query(message.text.strip())
         logger.info(f"🔍 Администратор {message.from_user.id} выполняет поиск: '{search_query}'")
 
         # Возвращаем состояние в меню пользователей
@@ -2084,12 +2118,13 @@ async def process_broadcast_target(callback: CallbackQuery, state: FSMContext):
 @router.message(StateFilter(AdminStates.broadcast_waiting_text))
 async def confirm_broadcast(message: Message, state: FSMContext):
     """Подтверждение рассылки."""
-    broadcast_text = message.text
+    # HIGH-003 FIX: Sanitize broadcast message to prevent HTML injection
+    broadcast_text = sanitize_broadcast_message(message.text, max_length=4096)
     data = await state.get_data()
-    
+
     target = data.get("broadcast_target")
     count = data.get("broadcast_count", 0)
-    
+
     await state.update_data(broadcast_text=broadcast_text)
     await state.set_state(AdminStates.broadcast_confirm)
     

@@ -22,6 +22,9 @@ from redis.asyncio import Redis
 # BLOCKER-001: Redis Sentinel HA support
 from utils.redis_manager import init_redis_manager, RedisSentinelManager
 
+# BLOCKER-002 FIX: Redis-backed password attempt tracking
+from utils.auth_security import init_auth_security
+
 # Добавляем корневую директорию проекта в путь для импорта
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -128,6 +131,10 @@ async def main():
                 f"   Circuit Breaker: ENABLED"
             )
 
+            # BLOCKER-002 FIX: Initialize AuthSecurity with Redis backend
+            init_auth_security(redis_fsm)
+            logger.info("✅ AuthSecurity initialized with Redis Sentinel backend")
+
         else:
             # Simple Redis mode (development)
             redis_fsm = Redis.from_url(
@@ -144,6 +151,10 @@ async def main():
             logger.info(
                 f"✅ Redis FSM Storage инициализирован (simple mode): {config.redis.url}/{config.redis.fsm_db}"
             )
+
+            # BLOCKER-002 FIX: Initialize AuthSecurity with Redis backend
+            init_auth_security(redis_fsm)
+            logger.info("✅ AuthSecurity initialized with Redis backend")
 
     except Exception as e:
         logger.error(
