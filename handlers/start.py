@@ -13,6 +13,8 @@ from states.menu_states import MenuStates
 from database.models import User
 from database.crud import UserCRUD
 from utils.logger import logger, log_user_action
+# HIGH-003 FIX: Input sanitization
+from utils.sanitize import sanitize_user_input, sanitize_username
 
 router = Router(name="start_router")
 
@@ -324,16 +326,23 @@ async def cmd_profile(
             )
             return
         
+        # HIGH-003 FIX: Sanitize user data before display
+        full_name = sanitize_user_input(user.full_name, max_length=100)
+        username = sanitize_username(user.username) if user.username else 'не указан'
+        department = sanitize_user_input(user.department or 'не указан', max_length=50)
+        position = sanitize_user_input(user.position or 'не указана', max_length=100)
+        park = sanitize_user_input(user.park_location or 'не указан', max_length=50)
+
         # Формируем текст профиля
         profile_text = f"""
 👤 <b>Ваш профиль</b>
 
-<b>Имя:</b> {user.full_name}
-<b>Username:</b> @{user.username or 'не указан'}
+<b>Имя:</b> {full_name}
+<b>Username:</b> @{username}
 <b>ID:</b> <code>{user.telegram_id}</code>
-<b>Отдел:</b> {user.department or 'не указан'}
-<b>Должность:</b> {user.position or 'не указана'}
-<b>Парк:</b> {user.park_location or 'не указан'}
+<b>Отдел:</b> {department}
+<b>Должность:</b> {position}
+<b>Парк:</b> {park}
 
 📊 <b>Статистика:</b>
 <b>Дата регистрации:</b> {user.registration_date.strftime('%d.%m.%Y')}
