@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 import os
+import logging
 from dotenv import load_dotenv
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -44,10 +48,33 @@ class Database:
 
 @dataclass
 class Redis:
-    """Конфигурация Redis для FSM и rate limiting"""
+    """
+    Конфигурация Redis для FSM и rate limiting
+
+    BLOCKER-001 FIX: Поддержка Redis Sentinel для HA
+
+    Modes:
+    1. Sentinel HA Mode (Production):
+       - sentinel_nodes: List of (host, port) tuples
+       - master_name: Sentinel master name
+       - Automatic failover support
+
+    2. Simple Mode (Development):
+       - url: Direct Redis connection URL
+       - No HA, single instance
+    """
     url: str
     fsm_db: int = 0  # Database index для FSM хранилища
     throttle_db: int = 1  # Database index для throttling
+
+    # BLOCKER-001: Sentinel HA configuration
+    sentinel_nodes: Optional[List[tuple]] = None  # [(host1, port1), (host2, port2), ...]
+    master_name: str = "mymaster"  # Sentinel master name
+
+    @property
+    def is_sentinel_mode(self) -> bool:
+        """Check if Sentinel HA mode is enabled"""
+        return self.sentinel_nodes is not None and len(self.sentinel_nodes) > 0
 
 
 @dataclass
@@ -119,10 +146,36 @@ def load_config() -> Config:
     # База данных
     database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./bot.db")
 
-    # PRODUCTION v2.1: Redis для FSM и rate limiting
+    # PRODUCTION v3.0: Redis для FSM и rate limiting (с Sentinel HA support)
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
     if not redis_url.startswith("redis://"):
         redis_url = f"redis://{redis_url}"
+
+    # BLOCKER-001: Parse Sentinel nodes for HA mode
+    sentinel_nodes = None
+    sentinel_nodes_str = os.getenv("REDIS_SENTINEL_NODES", "")
+    if sentinel_nodes_str:
+        try:
+            # Parse format: "host1:port1,host2:port2,host3:port3"
+            nodes_list = []
+            for node_str in sentinel_nodes_str.split(","):
+                node_str = node_str.strip()
+                if ":" in node_str:
+                    host, port = node_str.split(":", 1)
+                    nodes_list.append((host.strip(), int(port.strip())))
+                else:
+                    print(f"⚠️ Invalid Sentinel node format: {node_str}, expected host:port")
+
+            if nodes_list:
+                sentinel_nodes = nodes_list
+                logger.info(
+                    f"✅ Redis Sentinel HA mode enabled: {len(sentinel_nodes)} nodes\n"
+                    f"   Nodes: {sentinel_nodes}"
+                )
+        except Exception as e:
+            print(f"⚠️ Error parsing REDIS_SENTINEL_NODES: {e}")
+
+    redis_master_name = os.getenv("REDIS_MASTER_NAME", "mymaster")
 
     # Rate limiting
     rate_limit_messages = int(os.getenv("RATE_LIMIT_MESSAGES", "3"))
@@ -167,7 +220,10 @@ def load_config() -> Config:
         redis=Redis(
             url=redis_url,
             fsm_db=int(os.getenv("REDIS_FSM_DB", "0")),
-            throttle_db=int(os.getenv("REDIS_THROTTLE_DB", "1"))
+            throttle_db=int(os.getenv("REDIS_THROTTLE_DB", "1")),
+            # BLOCKER-001: Sentinel HA configuration
+            sentinel_nodes=sentinel_nodes,
+            master_name=redis_master_name
         ),
         rate_limit=RateLimit(
             messages=rate_limit_messages,

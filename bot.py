@@ -19,6 +19,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage, DefaultKeyBuilder
 from redis.asyncio import Redis
 
+# BLOCKER-001: Redis Sentinel HA support
+from utils.redis_manager import init_redis_manager, RedisSentinelManager
+
 # Добавляем корневую директорию проекта в путь для импорта
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -89,20 +92,59 @@ async def main():
         )
     )
 
-    # CRIT-003 FIX: Redis FSM Storage для multi-instance support
-    try:
-        redis_fsm = Redis.from_url(
-            f"{config.redis.url}/{config.redis.fsm_db}",
-            decode_responses=True
-        )
-        # Test connection
-        await redis_fsm.ping()
+    # BLOCKER-001 FIX: Redis FSM Storage с Sentinel HA support
+    storage = None
+    redis_manager = None
 
-        storage = RedisStorage(
-            redis=redis_fsm,
-            key_builder=DefaultKeyBuilder(with_destiny=True)
-        )
-        logger.info(f"✅ Redis FSM Storage инициализирован: {config.redis.url}/{config.redis.fsm_db}")
+    try:
+        if config.redis.is_sentinel_mode:
+            # BLOCKER-001: Use Sentinel HA cluster
+            logger.info(
+                f"🔄 Initializing Redis Sentinel HA cluster...\n"
+                f"   Nodes: {config.redis.sentinel_nodes}\n"
+                f"   Master: {config.redis.master_name}"
+            )
+
+            redis_manager = await init_redis_manager(
+                sentinels=config.redis.sentinel_nodes,
+                master_name=config.redis.master_name,
+                db=config.redis.fsm_db,
+                socket_timeout=5.0,
+                max_connections=50,
+                enable_circuit_breaker=True
+            )
+
+            # Get Redis connection from Sentinel manager
+            redis_fsm = await redis_manager.get_redis()
+
+            storage = RedisStorage(
+                redis=redis_fsm,
+                key_builder=DefaultKeyBuilder(with_destiny=True)
+            )
+            logger.info(
+                f"✅ Redis FSM Storage инициализирован через Sentinel HA\n"
+                f"   Master: {config.redis.master_name}\n"
+                f"   Sentinels: {len(config.redis.sentinel_nodes)} nodes\n"
+                f"   Circuit Breaker: ENABLED"
+            )
+
+        else:
+            # Simple Redis mode (development)
+            redis_fsm = Redis.from_url(
+                f"{config.redis.url}/{config.redis.fsm_db}",
+                decode_responses=True
+            )
+            # Test connection
+            await redis_fsm.ping()
+
+            storage = RedisStorage(
+                redis=redis_fsm,
+                key_builder=DefaultKeyBuilder(with_destiny=True)
+            )
+            logger.info(
+                f"✅ Redis FSM Storage инициализирован (simple mode): {config.redis.url}/{config.redis.fsm_db}"
+            )
+
     except Exception as e:
         logger.error(
             f"⚠️ Redis недоступен: {e}\n"
@@ -126,18 +168,60 @@ async def main():
     # НИКОГДА НЕ МЕНЯЙТЕ ПОРЯДОК БЕЗ ПОЛНОГО ПОНИМАНИЯ ПОСЛЕДСТВИЙ!
     # См. tests/test_middleware_order.py для автоматической проверки
 
-    # 1. CRIT-002 & SEC-002 FIX: Redis Token Bucket Throttling
+    # 1. BLOCKER-001 & CRIT-002 & SEC-002 FIX: Redis Token Bucket Throttling с Sentinel support
     try:
-        throttling_middleware = await create_redis_throttling(
-            redis_url=f"{config.redis.url}/{config.redis.throttle_db}",
-            max_tokens=5,        # Burst capacity: 5 requests
-            refill_rate=0.5,     # Sustained: 1 req per 2 seconds
-            violation_threshold=3,
-            block_duration=60
-        )
-        dp.message.middleware(throttling_middleware)
-        dp.callback_query.middleware(throttling_middleware)
-        logger.info("✅ Redis Throttling Middleware активирован")
+        if config.redis.is_sentinel_mode:
+            # BLOCKER-001: Use Sentinel HA cluster for throttling
+            from middlewares.throttling_v2 import ThrottlingMiddlewareV2, RateLimitConfig
+
+            # Initialize separate Sentinel manager for throttling (different DB)
+            throttle_manager = await init_redis_manager(
+                sentinels=config.redis.sentinel_nodes,
+                master_name=config.redis.master_name,
+                db=config.redis.throttle_db,
+                socket_timeout=5.0,
+                max_connections=50,
+                enable_circuit_breaker=True
+            )
+
+            # Get Redis connection from Sentinel manager
+            throttle_redis = await throttle_manager.get_redis()
+
+            # Create middleware with Sentinel-backed Redis
+            throttle_config = RateLimitConfig(
+                max_tokens=5,
+                refill_rate=0.5,
+                violation_threshold=3,
+                block_duration=60
+            )
+
+            throttling_middleware = ThrottlingMiddlewareV2(
+                redis=throttle_redis,
+                config=throttle_config
+            )
+
+            dp.message.middleware(throttling_middleware)
+            dp.callback_query.middleware(throttling_middleware)
+
+            logger.info(
+                f"✅ Redis Throttling Middleware активирован через Sentinel HA\n"
+                f"   Master: {config.redis.master_name}\n"
+                f"   Circuit Breaker: ENABLED"
+            )
+
+        else:
+            # Simple Redis mode (development)
+            throttling_middleware = await create_redis_throttling(
+                redis_url=f"{config.redis.url}/{config.redis.throttle_db}",
+                max_tokens=5,        # Burst capacity: 5 requests
+                refill_rate=0.5,     # Sustained: 1 req per 2 seconds
+                violation_threshold=3,
+                block_duration=60
+            )
+            dp.message.middleware(throttling_middleware)
+            dp.callback_query.middleware(throttling_middleware)
+            logger.info("✅ Redis Throttling Middleware активирован (simple mode)")
+
     except Exception as e:
         logger.error(
             f"⚠️ Throttling Middleware НЕДОСТУПЕН: {e}\n"
@@ -152,12 +236,16 @@ async def main():
     dp.message.middleware(ErrorHandlingMiddleware())
     dp.callback_query.middleware(ErrorHandlingMiddleware())
 
-    # 4. CRIT-004 FIX: Async Logging Middleware (non-blocking)
-    async_logging = AsyncLoggingMiddleware(enable_performance_tracking=True)
+    # 4. BLOCKER-004 & CRIT-004 FIX: Async Logging Middleware (non-blocking + memory safe)
+    async_logging = AsyncLoggingMiddleware(
+        enable_performance_tracking=True,
+        max_concurrent_tasks=500,  # BLOCKER-004: Prevent unbounded task growth
+        cleanup_interval=60  # Cleanup every 60 seconds
+    )
     dp.message.middleware(async_logging)
     dp.callback_query.middleware(async_logging)
 
-    logger.info("✅ All Production Middlewares зарегистрированы (v2.1)")
+    logger.info("✅ All Production Middlewares зарегистрированы (v3.0 Enterprise)")
     
     # Регистрируем handlers
     # Порядок регистрации определяет приоритет обработки
@@ -243,6 +331,23 @@ async def main():
     finally:
         # Закрываем соединения при остановке
         logger.info("🛑 Остановка бота...")
+
+        # BLOCKER-004: Shutdown async logging middleware (cleanup tasks)
+        try:
+            await async_logging.shutdown()
+        except Exception as e:
+            logger.error(f"Error shutting down logging middleware: {e}")
+
+        # BLOCKER-001: Close Redis Sentinel managers if initialized
+        if redis_manager:
+            try:
+                await redis_manager.close()
+                logger.info("✅ Redis Sentinel FSM manager closed")
+            except Exception as e:
+                logger.error(f"Error closing Redis FSM manager: {e}")
+
+        # Note: throttle_manager is in different scope, handled by middleware cleanup
+
         await close_db()
         await bot.session.close()
         logger.info("✅ Бот остановлен, соединения закрыты")
