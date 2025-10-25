@@ -19,3 +19,18 @@ pytz>=2024.1
 redis==5.0.1
 # PRODUCTION v2.1: bcrypt for secure password hashing
 bcrypt==4.1.2
+
+# PRODUCTION v3.2: Database migrations
+alembic==1.13.1
+
+# PRODUCTION v3.2: PostgreSQL support
+psycopg2-binary==2.9.9
+asyncpg==0.29.0
+
+# PRODUCTION v3.2: Testing dependencies
+fakeredis[lua]==2.21.1
+pytest-mock==3.12.0
+
+# PRODUCTION v3.2: Monitoring and metrics
+prometheus-client==0.20.0
+psutil==5.9.8

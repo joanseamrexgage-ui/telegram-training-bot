@@ -35,6 +35,7 @@ from middlewares.auth import AuthMiddleware
 from middlewares.logging_v2 import AsyncLoggingMiddleware  # CRIT-004 FIX: v2.0
 from middlewares.throttling_v2 import create_redis_throttling, RateLimitConfig  # CRIT-002 FIX: v2.0
 from middlewares.errors import ErrorHandlingMiddleware  # VERSION 2.0
+from middlewares.timeout import TimeoutMiddleware  # HIGH-004 FIX: Timeout protection
 from utils.logger import logger
 # PRODUCTION MONITORING: Sentry integration for error tracking
 from utils.sentry_config import init_sentry
@@ -171,6 +172,7 @@ async def main():
     # Порядок выполнения КРИТИЧЕСКИ ВАЖЕН для безопасности и производительности!
     #
     # Execution Order (outer → inner):
+    # 0. Timeout       → Предотвращает зависание event loop (защита от DoS)
     # 1. Throttling    → Блокирует спам ДО любой обработки (защита ресурсов)
     # 2. Auth          → Аутентифицирует пользователя (требует DB)
     # 3. ErrorHandling → Ловит ошибки из handlers и внутренних middleware
@@ -178,6 +180,12 @@ async def main():
     #
     # НИКОГДА НЕ МЕНЯЙТЕ ПОРЯДОК БЕЗ ПОЛНОГО ПОНИМАНИЯ ПОСЛЕДСТВИЙ!
     # См. tests/test_middleware_order.py для автоматической проверки
+
+    # 0. HIGH-004 FIX: Timeout Protection (MUST BE FIRST!)
+    timeout_middleware = TimeoutMiddleware(timeout=30)
+    dp.message.middleware(timeout_middleware)
+    dp.callback_query.middleware(timeout_middleware)
+    logger.info("✅ Timeout middleware registered (30s timeout)")
 
     # 1. BLOCKER-001 & CRIT-002 & SEC-002 FIX: Redis Token Bucket Throttling с Sentinel support
     try:
