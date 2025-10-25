@@ -1,20 +1,12 @@
-# Development and CI/CD Dependencies
-# Code Quality & Linting
-black>=23.0.0
-isort>=5.12.0
-flake8>=6.0.0
-flake8-docstrings>=1.7.0
-flake8-bugbear>=23.0.0
-mypy>=1.0.0
-pylint>=3.0.0
+# MINIMAL Development Dependencies for CI
+# Only essential tools needed for testing and code quality
 
-# Security Scanning
-bandit>=1.7.5
-safety>=2.3.5
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
 
-# Testing (additional tools not in main requirements)
-pytest-timeout>=2.0.0
-pytest-xdist>=3.0.0
+# Security scanning (minimal)
+bandit>=1.7.0
+safety>=2.0.0
 
-# Pre-commit hooks
-pre-commit>=3.0.0
