@@ -1,0 +1,270 @@
+# Prometheus Alert Rules for Telegram Training Bot
+# These rules define alerting conditions for production monitoring
+
+groups:
+  - name: telegram_bot_alerts
+    interval: 30s
+    rules:
+      # ==================== CRITICAL ALERTS ====================
+
+      - alert: BotDown
+        expr: up{job="telegram-bot"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: bot
+        annotations:
+          summary: "Telegram bot is down"
+          description: "Bot instance {{ $labels.instance }} has been down for more than 1 minute"
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            rate(bot_errors_total[5m]) / rate(bot_requests_total[5m])
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          component: bot
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes (threshold: 5%)"
+
+      - alert: RedisDown
+        expr: bot_redis_connections_active == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: redis
+        annotations:
+          summary: "Redis connection lost"
+          description: "Bot has no active Redis connections. FSM and rate limiting will not work."
+
+      - alert: DatabaseDown
+        expr: bot_database_connections_active == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database connection lost"
+          description: "Bot has no active database connections."
+
+      - alert: TooManyTimeouts
+        expr: rate(bot_timeouts_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          component: bot
+        annotations:
+          summary: "Too many handler timeouts"
+          description: "{{ $value }} timeouts per second in the last 5 minutes (threshold: 0.1/s)"
+
+      # ==================== HIGH PRIORITY ALERTS ====================
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95, rate(bot_request_latency_seconds_bucket[5m])) > 2
+        for: 3m
+        labels:
+          severity: warning
+          component: bot
+        annotations:
+          summary: "High response latency detected"
+          description: "95th percentile latency is {{ $value }}s (threshold: 2s)"
+
+      - alert: MemoryUsageHigh
+        expr: bot_memory_usage_bytes > 1073741824  # 1GB
+        for: 5m
+        labels:
+          severity: warning
+          component: bot
+        annotations:
+          summary: "High memory usage"
+          description: "Bot is using {{ $value | humanizeBytes }} of memory (threshold: 1GB)"
+
+      - alert: HighCPUUsage
+        expr: bot_cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: bot
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}% (threshold: 80%)"
+
+      - alert: RedisSentinelFailover
+        expr: increase(bot_redis_failovers_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: redis
+        annotations:
+          summary: "Redis Sentinel failover occurred"
+          description: "{{ $value }} failover(s) in the last 5 minutes"
+
+      - alert: BruteForceAttack
+        expr: rate(bot_failed_logins_total[1m]) > 10
+        for: 30s
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "Potential brute force attack"
+          description: "{{ $value }} failed login attempts per second in the last minute"
+
+      # ==================== MEDIUM PRIORITY ALERTS ====================
+
+      - alert: IncreasedErrorRate
+        expr: |
+          (
+            rate(bot_errors_total[5m]) / rate(bot_requests_total[5m])
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: info
+          component: bot
+        annotations:
+          summary: "Increased error rate"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 1%)"
+
+      - alert: SlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.95, rate(bot_database_query_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: info
+          component: database
+        annotations:
+          summary: "Slow database queries detected"
+          description: "95th percentile database query duration is {{ $value }}s (threshold: 1s)"
+
+      - alert: LowActiveUsers
+        expr: |
+          bot_active_users_24h < 10
+          and
+          hour() >= 9 and hour() <= 22
+        for: 30m
+        labels:
+          severity: info
+          component: business
+        annotations:
+          summary: "Low active user count"
+          description: "Only {{ $value }} active users in the last 24 hours during business hours"
+
+      - alert: HighBlockedUsersCount
+        expr: bot_blocked_users_total > 50
+        for: 10m
+        labels:
+          severity: info
+          component: security
+        annotations:
+          summary: "High number of blocked users"
+          description: "{{ $value }} users are currently blocked"
+
+      # ==================== CAPACITY ALERTS ====================
+
+      - alert: HighRequestRate
+        expr: rate(bot_requests_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: info
+          component: capacity
+        annotations:
+          summary: "High request rate"
+          description: "Request rate is {{ $value }} requests/second (threshold: 100/s)"
+
+      - alert: RedisMemoryHigh
+        expr: bot_redis_memory_usage_bytes > 209715200  # 200MB
+        for: 10m
+        labels:
+          severity: warning
+          component: redis
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Redis is using {{ $value | humanizeBytes }} (threshold: 200MB, limit: 256MB)"
+
+      - alert: DatabaseConnectionPoolExhaustion
+        expr: |
+          (
+            bot_database_connections_active / bot_database_connections_max
+          ) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database connection pool near exhaustion"
+          description: "{{ $value | humanizePercentage }} of database connections are in use"
+
+      # ==================== BUSINESS METRICS ALERTS ====================
+
+      - alert: NoNewUserRegistrations
+        expr: |
+          increase(bot_user_registrations_total[1h]) == 0
+          and
+          hour() >= 9 and hour() <= 22
+        for: 2h
+        labels:
+          severity: info
+          component: business
+        annotations:
+          summary: "No new user registrations"
+          description: "No new users have registered in the last hour during business hours"
+
+      - alert: UnusualAdminActivity
+        expr: rate(bot_admin_operations_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: info
+          component: security
+        annotations:
+          summary: "Unusual admin activity detected"
+          description: "{{ $value }} admin operations per second (may indicate automation or issue)"
+
+      # ==================== INFRASTRUCTURE ALERTS ====================
+
+      - alert: DiskSpaceWarning
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}
+          ) < 0.2
+        for: 10m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Low disk space"
+          description: "Only {{ $value | humanizePercentage }} disk space remaining"
+
+      - alert: ContainerRestartLoop
+        expr: rate(container_restarts_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Container restart loop detected"
+          description: "Container {{ $labels.container }} is restarting frequently"
+
+      # ==================== DATA INTEGRITY ALERTS ====================
+
+      - alert: FSMStateLeakage
+        expr: bot_fsm_states_total > 1000
+        for: 30m
+        labels:
+          severity: warning
+          component: bot
+        annotations:
+          summary: "Possible FSM state leakage"
+          description: "{{ $value }} active FSM states (threshold: 1000). May indicate states not being cleaned up."
+
+      - alert: StaleSessionsDetected
+        expr: bot_stale_sessions_total > 100
+        for: 15m
+        labels:
+          severity: info
+          component: bot
+        annotations:
+          summary: "High number of stale sessions"
+          description: "{{ $value }} stale sessions detected. Consider running cleanup."

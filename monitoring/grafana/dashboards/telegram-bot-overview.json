@@ -1,0 +1,280 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "telegram-bot-prod",
+    "title": "Telegram Training Bot - Production Overview",
+    "tags": ["telegram", "bot", "production"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request Rate & Status",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(bot_requests_total[5m])",
+            "legendFormat": "{{handler}} - {{status}}",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(bot_errors_total[5m])",
+            "legendFormat": "Errors - {{error_type}}",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"label": "Requests/sec", "format": "short"},
+          {"label": null, "format": "short"}
+        ],
+        "alert": {
+          "name": "High Error Rate",
+          "conditions": [
+            {
+              "evaluator": {"params": [0.1], "type": "gt"},
+              "operator": {"type": "and"},
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "for": "1m",
+          "frequency": "10s",
+          "handler": 1,
+          "message": "Error rate exceeded 10%",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 2,
+        "title": "Response Latency (P95, P99)",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(bot_request_latency_seconds_bucket[5m]))",
+            "legendFormat": "P95 Latency",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(bot_request_latency_seconds_bucket[5m]))",
+            "legendFormat": "P99 Latency",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"label": "Seconds", "format": "s"},
+          {"label": null, "format": "short"}
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Active Users & Business Metrics",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "bot_active_users_24h",
+            "legendFormat": "Active Users (24h)",
+            "refId": "A"
+          },
+          {
+            "expr": "bot_fsm_states_total",
+            "legendFormat": "Active Sessions",
+            "refId": "B"
+          },
+          {
+            "expr": "bot_admin_sessions_active",
+            "legendFormat": "Admin Sessions",
+            "refId": "C"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "fields": "",
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        }
+      },
+      {
+        "id": 4,
+        "title": "System Resources (Memory & CPU)",
+        "type": "graph",
+        "gridPos": {"x": 6, "y": 8, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "bot_memory_usage_bytes / 1024 / 1024",
+            "legendFormat": "Memory (MB)",
+            "refId": "A"
+          },
+          {
+            "expr": "bot_cpu_usage_percent",
+            "legendFormat": "CPU %",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"label": "Memory (MB) / CPU %", "format": "short"},
+          {"label": null, "format": "short"}
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Redis Operations & Health",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "bot_redis_connections_active",
+            "legendFormat": "Active Connections",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(bot_redis_failovers_total[5m])",
+            "legendFormat": "Failovers/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(bot_redis_operation_latency_seconds_bucket[5m]))",
+            "legendFormat": "P95 Latency",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"label": "Count / Latency", "format": "short"},
+          {"label": null, "format": "short"}
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Security Events",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(bot_failed_logins_total[5m])",
+            "legendFormat": "Failed Logins/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "bot_blocked_users_total",
+            "legendFormat": "Currently Blocked Users",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(bot_timeouts_total[5m])",
+            "legendFormat": "Timeouts/sec",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"label": "Events/sec", "format": "short"},
+          {"label": null, "format": "short"}
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Database Performance",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 24, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(bot_database_queries_total[5m])",
+            "legendFormat": "Queries/sec - {{query_type}}",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(bot_database_query_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95 Query Duration",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"label": "Queries/sec / Duration", "format": "short"},
+          {"label": null, "format": "short"}
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Handler Timeouts",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 24, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(bot_handler_timeouts_total[5m])",
+            "legendFormat": "Timeouts - {{handler}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"label": "Timeouts/sec", "format": "short"},
+          {"label": null, "format": "short"}
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Top Used Handlers",
+        "type": "piechart",
+        "gridPos": {"x": 0, "y": 32, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "sum by (handler) (increase(bot_requests_total[1h]))",
+            "legendFormat": "{{handler}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "User Department Distribution",
+        "type": "piechart",
+        "gridPos": {"x": 12, "y": 32, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "bot_users_by_department",
+            "legendFormat": "{{department}}",
+            "refId": "A"
+          }
+        ]
+      }
+    ],
+    "templating": {
+      "list": []
+    },
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "editable": true,
+    "gnetId": null,
+    "graphTooltip": 1,
+    "links": [],
+    "liveNow": false,
+    "style": "dark"
+  },
+  "overwrite": true
+}
