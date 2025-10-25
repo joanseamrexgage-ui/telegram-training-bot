@@ -39,6 +39,20 @@ addopts = [
     "--cov-report=html",
     "--cov-report=term-missing",
 ]
+markers = [
+    "unit: Unit tests (fast, isolated)",
+    "integration: Integration tests (requires external services)",
+    "security: Security tests (auth, validation, injection)",
+    "performance: Performance and load tests",
+    "e2e: End-to-end tests (full user workflows)",
+    "slow: Tests that take >1 second",
+    "asyncio: Async tests",
+]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
 
 [tool.coverage.run]
 source = ["."]

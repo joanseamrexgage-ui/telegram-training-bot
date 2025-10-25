@@ -1,0 +1,12 @@
+# MINIMAL Development Dependencies for CI
+# Only essential tools needed for testing and code quality
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
+
+# Security scanning (minimal)
+bandit>=1.7.0
+safety>=2.0.0
+

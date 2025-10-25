@@ -1,0 +1,49 @@
+"""Пакет для работы с базой данных."""
+
+from database.models import User, UserActivity, Content
+from database.database import init_db, close_db, async_session_maker
+from database.crud import (
+    get_or_create_user,
+    get_user_by_telegram_id,
+    get_all_users,
+    block_user,
+    unblock_user,
+    is_user_blocked,
+    log_user_activity,
+    get_user_activity,
+    get_statistics,
+    get_section_statistics,
+    get_active_users_count,
+    get_new_users_count,
+    get_blocked_users,
+    get_content,
+    update_content,
+    delete_content,
+    save_broadcast_history
+)
+
+__all__ = [
+    'User',
+    'UserActivity',
+    'Content',
+    'init_db',
+    'close_db',
+    'async_session_maker',
+    'get_or_create_user',
+    'get_user_by_telegram_id',
+    'get_all_users',
+    'block_user',
+    'unblock_user',
+    'is_user_blocked',
+    'log_user_activity',
+    'get_user_activity',
+    'get_statistics',
+    'get_section_statistics',
+    'get_active_users_count',
+    'get_new_users_count',
+    'get_blocked_users',
+    'get_content',
+    'update_content',
+    'delete_content',
+    'save_broadcast_history'
+]

@@ -1,0 +1,445 @@
+# ============================================================================
+# Critical Production Alerts for telegram-training-bot
+# ============================================================================
+#
+# These alerts are for CRITICAL issues that require immediate attention
+# and will trigger PagerDuty/on-call notifications
+#
+# Severity Levels:
+# - critical: Page on-call engineer immediately (P1)
+# - warning: Notify team channel, escalate if not resolved (P2)
+# - info: Log for review, no immediate action required (P3)
+#
+# ============================================================================
+
+groups:
+  # ==========================================================================
+  # SERVICE AVAILABILITY - P1 Critical
+  # ==========================================================================
+  - name: service_availability_critical
+    interval: 15s
+    rules:
+      - alert: BotCompletelyDown
+        expr: up{job="telegram-bot"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: bot
+          priority: P1
+          escalate: immediate
+        annotations:
+          summary: "🚨 CRITICAL: Telegram bot is completely down"
+          description: |
+            Bot instance {{ $labels.instance }} has been down for 30 seconds.
+
+            IMMEDIATE ACTIONS REQUIRED:
+            1. Check Docker container status
+            2. Verify Redis and Database connectivity
+            3. Review application logs
+            4. Check system resources
+
+            Impact: ALL USERS AFFECTED
+            Escalation: Page on-call immediately
+          runbook_url: "https://wiki.example.com/runbooks/bot-down"
+          dashboard_url: "http://grafana:3000/d/telegram-bot-overview"
+
+      - alert: AllBotInstancesDown
+        expr: count(up{job="telegram-bot"} == 1) == 0
+        for: 15s
+        labels:
+          severity: critical
+          component: bot
+          priority: P1
+          escalate: immediate
+        annotations:
+          summary: "🚨 CRITICAL: ALL bot instances are down"
+          description: |
+            Complete service outage - no healthy instances detected.
+
+            DISASTER RECOVERY PROCEDURE:
+            1. Activate incident response team
+            2. Check infrastructure status (AWS/GCP/servers)
+            3. Verify network connectivity
+            4. Initiate failover procedures
+            5. Consider activating DR site
+
+            Impact: TOTAL SERVICE OUTAGE
+            SLA: 99.9% uptime target violated
+
+  # ==========================================================================
+  # DATABASE FAILURES - P1 Critical
+  # ==========================================================================
+  - name: database_critical
+    interval: 15s
+    rules:
+      - alert: DatabaseConnectionPoolExhausted
+        expr: |
+          (
+            bot_database_connections_active / bot_database_connections_max
+          ) > 0.95
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+          priority: P1
+        annotations:
+          summary: "🚨 Database connection pool near exhaustion"
+          description: |
+            {{ $value | humanizePercentage }} of database connections in use.
+
+            IMMEDIATE ACTIONS:
+            1. Check for connection leaks
+            2. Review slow queries
+            3. Consider increasing pool size
+            4. Check for deadlocks
+
+            Current: {{ $value | humanizePercentage }}
+            Threshold: 95%
+
+      - alert: DatabaseDown
+        expr: bot_database_connections_active == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: database
+          priority: P1
+        annotations:
+          summary: "🚨 CRITICAL: Database connection lost"
+          description: |
+            No active database connections detected.
+
+            RECOVERY STEPS:
+            1. Check PostgreSQL service status
+            2. Verify network connectivity
+            3. Review database logs
+            4. Check disk space
+            5. Attempt manual connection
+
+            Impact: Cannot persist data, users may experience errors
+
+      - alert: DatabaseReplicationLag
+        expr: pg_replication_lag_seconds > 30
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+          priority: P1
+        annotations:
+          summary: "Database replication lag critical"
+          description: |
+            Replication lag: {{ $value }}s (threshold: 30s)
+
+            ACTIONS:
+            1. Check replica health
+            2. Review replication logs
+            3. Monitor disk I/O
+            4. Consider failing over if lag persists
+
+  # ==========================================================================
+  # REDIS FAILURES - P1 Critical
+  # ==========================================================================
+  - name: redis_critical
+    interval: 15s
+    rules:
+      - alert: RedisDown
+        expr: bot_redis_connections_active == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: redis
+          priority: P1
+        annotations:
+          summary: "🚨 CRITICAL: Redis connection lost"
+          description: |
+            No active Redis connections. FSM and rate limiting disabled.
+
+            IMMEDIATE ACTIONS:
+            1. Check Redis Sentinel status
+            2. Verify master availability
+            3. Check failover logs
+            4. Review network connectivity
+
+            Impact: User sessions lost, rate limiting inactive
+            Degraded Mode: Fallback to memory storage
+
+      - alert: RedisSentinelQuorumLost
+        expr: redis_sentinel_quorum < 2
+        for: 30s
+        labels:
+          severity: critical
+          component: redis
+          priority: P1
+        annotations:
+          summary: "🚨 Redis Sentinel quorum lost"
+          description: |
+            Sentinel quorum: {{ $value }} (minimum: 2)
+
+            CRITICAL ISSUE: Cannot perform automatic failover!
+
+            ACTIONS:
+            1. Check all Sentinel instances
+            2. Verify network partitioning
+            3. Restart failed Sentinels
+            4. Manual failover may be required
+
+      - alert: RedisMemoryNearLimit
+        expr: |
+          (bot_redis_memory_usage_bytes / 268435456) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          component: redis
+          priority: P1
+        annotations:
+          summary: "Redis memory usage critical"
+          description: |
+            {{ $value | humanizePercentage }} of max memory used (256MB limit)
+
+            ACTIONS:
+            1. Check for memory leaks
+            2. Review key expiration policies
+            3. Clear old FSM states
+            4. Consider increasing memory limit
+
+            Risk: Redis will start evicting keys!
+
+  # ==========================================================================
+  # PERFORMANCE DEGRADATION - P1 Critical
+  # ==========================================================================
+  - name: performance_critical
+    interval: 30s
+    rules:
+      - alert: ExtremlyHighLatency
+        expr: |
+          histogram_quantile(0.99, rate(bot_request_latency_seconds_bucket[5m])) > 10
+        for: 2m
+        labels:
+          severity: critical
+          component: bot
+          priority: P1
+        annotations:
+          summary: "🚨 Extremely high response latency detected"
+          description: |
+            P99 latency: {{ $value }}s (threshold: 10s)
+
+            SERVICE SEVERELY DEGRADED
+
+            INVESTIGATE:
+            1. Check database query performance
+            2. Review Redis operations
+            3. Check external API timeouts
+            4. Verify system resources
+            5. Look for blocking operations
+
+            User experience: Severely impacted
+
+      - alert: ErrorRateSpike
+        expr: |
+          (
+            rate(bot_errors_total[1m]) / rate(bot_requests_total[1m])
+          ) > 0.5
+        for: 1m
+        labels:
+          severity: critical
+          component: bot
+          priority: P1
+        annotations:
+          summary: "🚨 CRITICAL: Error rate spike detected"
+          description: |
+            Error rate: {{ $value | humanizePercentage }} (threshold: 50%)
+
+            SEVERE ISSUE DETECTED
+
+            IMMEDIATE ACTIONS:
+            1. Check recent deployments (rollback if needed)
+            2. Review error logs
+            3. Check external dependencies
+            4. Verify configuration changes
+
+            Impact: Majority of requests failing
+
+  # ==========================================================================
+  # MEMORY LEAKS - P1 Critical
+  # ==========================================================================
+  - name: memory_leak_detection
+    interval: 1m
+    rules:
+      - alert: MemoryLeakDetected
+        expr: |
+          (
+            bot_memory_usage_bytes - bot_memory_usage_bytes offset 30m
+          ) > 524288000
+        for: 10m
+        labels:
+          severity: critical
+          component: bot
+          priority: P1
+        annotations:
+          summary: "🚨 Potential memory leak detected"
+          description: |
+            Memory increased by {{ $value | humanizeBytes }} in 30 minutes
+
+            MEMORY LEAK INDICATORS:
+            - Continuous memory growth
+            - No corresponding traffic increase
+            - Growth rate: {{ $value | humanizeBytes }}/30min
+
+            ACTIONS:
+            1. Review recent code changes
+            2. Check for unclosed connections
+            3. Analyze object retention
+            4. Consider restarting affected instances
+            5. Generate heap dump for analysis
+
+      - alert: OutOfMemoryRisk
+        expr: |
+          (
+            bot_memory_usage_bytes / 1073741824
+          ) > 0.95
+        for: 2m
+        labels:
+          severity: critical
+          component: bot
+          priority: P1
+        annotations:
+          summary: "🚨 CRITICAL: Out of memory risk"
+          description: |
+            Memory usage: {{ $value | humanizePercentage }} of 1GB limit
+
+            IMMEDIATE RISK OF OOM KILLER
+
+            EMERGENCY ACTIONS:
+            1. Identify memory-heavy processes
+            2. Clear caches if possible
+            3. Consider emergency restart
+            4. Scale up instances
+            5. Increase memory limits
+
+  # ==========================================================================
+  # SECURITY INCIDENTS - P1 Critical
+  # ==========================================================================
+  - name: security_critical
+    interval: 30s
+    rules:
+      - alert: BruteForceAttackInProgress
+        expr: rate(bot_failed_logins_total[1m]) > 50
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+          priority: P1
+        annotations:
+          summary: "🚨 SECURITY: Brute force attack in progress"
+          description: |
+            {{ $value }} failed login attempts per second
+
+            SECURITY INCIDENT
+
+            ACTIONS:
+            1. Identify attacking IPs
+            2. Implement temporary IP blocks
+            3. Review rate limiting effectiveness
+            4. Check for credential stuffing
+            5. Notify security team
+
+            Threshold: 50 attempts/sec (CRITICAL)
+
+      - alert: MassiveBlockedUsersIncrease
+        expr: |
+          (
+            bot_blocked_users_total - bot_blocked_users_total offset 5m
+          ) > 100
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+          priority: P1
+        annotations:
+          summary: "🚨 SECURITY: Massive increase in blocked users"
+          description: |
+            {{ $value }} users blocked in last 5 minutes
+
+            POSSIBLE ATTACK VECTOR
+
+            INVESTIGATE:
+            1. Check for coordinated attack
+            2. Review blocking triggers
+            3. Analyze traffic patterns
+            4. Check for false positives
+            5. Verify security rules
+
+      - alert: UnauthorizedAdminAccess
+        expr: rate(bot_unauthorized_admin_attempts_total[5m]) > 5
+        for: 1m
+        labels:
+          severity: critical
+          component: security
+          priority: P1
+        annotations:
+          summary: "🚨 SECURITY: Unauthorized admin access attempts"
+          description: |
+            {{ $value }} unauthorized admin access attempts in 5 minutes
+
+            SECURITY BREACH ATTEMPT
+
+            IMMEDIATE ACTIONS:
+            1. Identify source IPs
+            2. Block malicious IPs
+            3. Review admin credentials
+            4. Check for compromised accounts
+            5. Escalate to security team
+
+  # ==========================================================================
+  # DATA INTEGRITY - P1 Critical
+  # ==========================================================================
+  - name: data_integrity_critical
+    interval: 1m
+    rules:
+      - alert: MassiveDataLoss
+        expr: |
+          (
+            bot_total_users - bot_total_users offset 5m
+          ) < -100
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+          priority: P1
+        annotations:
+          summary: "🚨 CRITICAL: Massive data loss detected"
+          description: |
+            Lost {{ $value }} users in last 5 minutes
+
+            DATA INTEGRITY ISSUE
+
+            EMERGENCY ACTIONS:
+            1. STOP all write operations
+            2. Check for database corruption
+            3. Verify backup integrity
+            4. Review deletion logs
+            5. Activate data recovery procedures
+
+            Impact: CRITICAL DATA LOSS
+
+      - alert: FSMStateExplosion
+        expr: bot_fsm_states_total > 10000
+        for: 5m
+        labels:
+          severity: critical
+          component: bot
+          priority: P1
+        annotations:
+          summary: "FSM state explosion detected"
+          description: |
+            {{ $value }} active FSM states (normal: < 1000)
+
+            POSSIBLE ISSUES:
+            - Memory leak in FSM storage
+            - States not being cleaned up
+            - Attack/abuse attempt
+
+            ACTIONS:
+            1. Review FSM cleanup logic
+            2. Check for stuck states
+            3. Consider force cleanup
+            4. Investigate unusual patterns

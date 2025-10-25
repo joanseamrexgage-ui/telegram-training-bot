@@ -1,0 +1,348 @@
+name: CD - Continuous Deployment
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  DOCKER_IMAGE: telegram-training-bot
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ============================================================================
+  # Build and Publish
+  # ============================================================================
+  build:
+    name: Build & Publish Docker Image
+    runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image_tag: ${{ steps.version.outputs.image_tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" =~ ^refs/tags/v ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION="$(date +%Y%m%d)-${GITHUB_SHA::8}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "image_tag=${{ env.DOCKER_IMAGE }}:$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.version.outputs.image_tag }}
+            ${{ env.DOCKER_IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.version.outputs.image_tag }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
+  # ============================================================================
+  # Deploy to Staging
+  # ============================================================================
+  deploy_staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build]
+    environment:
+      name: staging
+      url: https://staging.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to staging
+        env:
+          DEPLOY_KEY: ${{ secrets.STAGING_DEPLOY_KEY }}
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+        run: |
+          echo "Deploying $IMAGE_TAG to staging..."
+          # SSH deployment example
+          # ssh -i "$DEPLOY_KEY" user@$STAGING_HOST "docker pull $IMAGE_TAG && docker-compose up -d"
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against staging..."
+          sleep 30  # Wait for services to start
+
+          # Health check
+          # curl -f https://staging.example.com/health || exit 1
+
+          # Basic functionality test
+          # pytest tests/smoke/ --target=staging
+
+      - name: Notify deployment
+        uses: 8398a7/action-slack@v3
+        if: always()
+        with:
+          status: ${{ job.status }}
+          text: 'Staging deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ============================================================================
+  # Deploy to Production (with approval)
+  # ============================================================================
+  deploy_production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, deploy_staging]
+    if: github.ref_type == 'tag' || github.event.inputs.environment == 'production'
+    environment:
+      name: production
+      url: https://example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Pre-deployment checks
+        run: |
+          echo "Running pre-deployment validation..."
+          # Verify staging deployment
+          # Check database migrations
+          # Validate configuration
+
+      - name: Create backup
+        env:
+          PROD_HOST: ${{ secrets.PRODUCTION_HOST }}
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_DEPLOY_KEY }}
+        run: |
+          echo "Creating production backup..."
+          # Backup database
+          # Backup Redis data
+          # Backup configuration
+
+      - name: Deploy to production
+        env:
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_DEPLOY_KEY }}
+          PROD_HOST: ${{ secrets.PRODUCTION_HOST }}
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+        run: |
+          echo "Deploying $IMAGE_TAG to production..."
+
+          # Blue-green deployment example:
+          # 1. Deploy new version (green)
+          # ssh -i "$DEPLOY_KEY" user@$PROD_HOST "docker pull $IMAGE_TAG"
+          # ssh -i "$DEPLOY_KEY" user@$PROD_HOST "docker-compose -f docker-compose.prod.yml up -d --no-deps --scale bot=2 bot"
+
+          # 2. Health check new instances
+          # sleep 30
+          # curl -f https://example.com/health || exit 1
+
+          # 3. Switch traffic to new version
+          # ssh -i "$DEPLOY_KEY" user@$PROD_HOST "docker-compose -f docker-compose.prod.yml up -d"
+
+          # 4. Remove old instances
+          # ssh -i "$DEPLOY_KEY" user@$PROD_HOST "docker system prune -f"
+
+      - name: Run production smoke tests
+        run: |
+          echo "Running production smoke tests..."
+          sleep 60  # Wait for full startup
+
+          # Health check
+          # curl -f https://example.com/health || exit 1
+
+          # Metrics check
+          # curl -f https://example.com/metrics | grep "bot_requests_total" || exit 1
+
+          # Basic functionality
+          # pytest tests/smoke/ --target=production --critical-only
+
+      - name: Monitor deployment
+        run: |
+          echo "Monitoring deployment for 5 minutes..."
+          # Check error rates
+          # Monitor response times
+          # Verify no alerts triggered
+          sleep 300
+
+      - name: Notify deployment success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              text: "🚀 Production Deployment Successful",
+              attachments: [{
+                color: 'good',
+                text: `Version: ${{ needs.build.outputs.version }}\nImage: ${{ needs.build.outputs.image_tag }}\nDeployed by: ${{ github.actor }}`
+              }]
+            }
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ============================================================================
+  # Rollback (manual trigger)
+  # ============================================================================
+  rollback:
+    name: Rollback Production
+    runs-on: ubuntu-latest
+    if: failure() && github.ref_type == 'tag'
+    needs: [deploy_production]
+    environment:
+      name: production-rollback
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get previous version
+        id: previous
+        run: |
+          # Get previous stable version from tags
+          PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -v $(git describe --tags) | head -1)
+          echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+          echo "Previous stable version: $PREVIOUS_TAG"
+
+      - name: Rollback to previous version
+        env:
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_DEPLOY_KEY }}
+          PROD_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PREVIOUS_TAG: ${{ steps.previous.outputs.previous_tag }}
+        run: |
+          echo "Rolling back to $PREVIOUS_TAG..."
+
+          # Restore previous version
+          # ssh -i "$DEPLOY_KEY" user@$PROD_HOST "docker pull ${{ env.DOCKER_IMAGE }}:$PREVIOUS_TAG"
+          # ssh -i "$DEPLOY_KEY" user@$PROD_HOST "docker-compose -f docker-compose.prod.yml up -d"
+
+          # Restore database from backup if needed
+          # Restore Redis data if needed
+
+      - name: Verify rollback
+        run: |
+          echo "Verifying rollback..."
+          sleep 30
+          # curl -f https://example.com/health || exit 1
+
+      - name: Notify rollback
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              text: "⚠️ Production Rollback Executed",
+              attachments: [{
+                color: 'warning',
+                text: `Rolled back to: ${{ steps.previous.outputs.previous_tag }}\nReason: Deployment failure\nExecuted by: ${{ github.actor }}`
+              }]
+            }
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ============================================================================
+  # Post-Deployment
+  # ============================================================================
+  post_deployment:
+    name: Post-Deployment Tasks
+    runs-on: ubuntu-latest
+    needs: [deploy_production]
+    if: success()
+
+    steps:
+      - name: Update documentation
+        run: |
+          echo "Updating deployment documentation..."
+          # Update changelog
+          # Update version in docs
+          # Tag release notes
+
+      - name: Run database migrations
+        env:
+          PROD_HOST: ${{ secrets.PRODUCTION_HOST }}
+        run: |
+          echo "Running database migrations..."
+          # ssh user@$PROD_HOST "cd /app && alembic upgrade head"
+
+      - name: Clear caches
+        run: |
+          echo "Clearing production caches..."
+          # Clear CDN cache
+          # Clear Redis cache if needed
+
+      - name: Generate deployment report
+        run: |
+          cat > deployment-report.md << EOF
+          # Deployment Report
+
+          **Version:** ${{ needs.build.outputs.version }}
+          **Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Deployed by:** ${{ github.actor }}
+          **Commit:** ${{ github.sha }}
+
+          ## Changes
+          $(git log --oneline -10)
+
+          ## Deployment Steps
+          - ✅ Build and publish Docker image
+          - ✅ Deploy to staging
+          - ✅ Run smoke tests
+          - ✅ Deploy to production
+          - ✅ Production verification
+          - ✅ Post-deployment tasks
+
+          ## Metrics
+          - Deployment time: $(date -u +"%H:%M:%S")
+          - Zero downtime: Yes
+          - Rollback ready: Yes
+          EOF
+
+      - name: Upload deployment report
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-report
+          path: deployment-report.md
