@@ -31,11 +31,23 @@ class Database:
     """Конфигурация базы данных"""
     url: str
     echo: bool = False
-    
+    pool_size: int = 20
+    max_overflow: int = 30
+    pool_timeout: int = 30
+    pool_recycle: int = 3600
+
     @property
     def is_sqlite(self) -> bool:
         """Проверяет, используется ли SQLite"""
         return "sqlite" in self.url.lower()
+
+
+@dataclass
+class Redis:
+    """Конфигурация Redis для FSM и rate limiting"""
+    url: str
+    fsm_db: int = 0  # Database index для FSM хранилища
+    throttle_db: int = 1  # Database index для throttling
 
 
 @dataclass
@@ -65,6 +77,7 @@ class Config:
     """Общая конфигурация приложения"""
     tg_bot: TgBot
     db: Database
+    redis: Redis
     rate_limit: RateLimit
     paths: Paths
     debug: bool = False
@@ -105,7 +118,12 @@ def load_config() -> Config:
     
     # База данных
     database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./bot.db")
-    
+
+    # PRODUCTION v2.1: Redis для FSM и rate limiting
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    if not redis_url.startswith("redis://"):
+        redis_url = f"redis://{redis_url}"
+
     # Rate limiting
     rate_limit_messages = int(os.getenv("RATE_LIMIT_MESSAGES", "3"))
     rate_limit_callbacks = int(os.getenv("RATE_LIMIT_CALLBACKS", "5"))
@@ -140,7 +158,16 @@ def load_config() -> Config:
         ),
         db=Database(
             url=database_url,
-            echo=os.getenv("DEBUG", "False").lower() == "true"
+            echo=os.getenv("DEBUG", "False").lower() == "true",
+            pool_size=int(os.getenv("DB_POOL_SIZE", "20")),
+            max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "30")),
+            pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", "30")),
+            pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "3600"))
+        ),
+        redis=Redis(
+            url=redis_url,
+            fsm_db=int(os.getenv("REDIS_FSM_DB", "0")),
+            throttle_db=int(os.getenv("REDIS_THROTTLE_DB", "1"))
         ),
         rate_limit=RateLimit(
             messages=rate_limit_messages,

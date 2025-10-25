@@ -15,3 +15,7 @@ pytest-cov==6.0.0
 # Timezone support (required for zoneinfo on Windows and as fallback)
 tzdata>=2024.1
 pytz>=2024.1
+# PRODUCTION v2.1: Redis for FSM storage and distributed rate limiting
+redis==5.0.1
+# PRODUCTION v2.1: bcrypt for secure password hashing
+bcrypt==4.1.2

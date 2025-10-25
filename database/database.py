@@ -20,17 +20,33 @@ from utils.logger import logger
 
 class DatabaseManager:
     """Менеджер для работы с базой данных"""
-    
-    def __init__(self, database_url: str, echo: bool = False):
+
+    def __init__(
+        self,
+        database_url: str,
+        echo: bool = False,
+        pool_size: int = 20,
+        max_overflow: int = 30,
+        pool_timeout: int = 30,
+        pool_recycle: int = 3600
+    ):
         """
         Инициализация менеджера БД
-        
+
         Args:
             database_url: URL подключения к БД
             echo: Выводить SQL запросы в лог
+            pool_size: Размер пула соединений (ARCH-003)
+            max_overflow: Максимальное количество дополнительных соединений
+            pool_timeout: Таймаут ожидания свободного соединения (сек)
+            pool_recycle: Время переиспользования соединения (сек)
         """
         self.database_url = database_url
         self.echo = echo
+        self.pool_size = pool_size
+        self.max_overflow = max_overflow
+        self.pool_timeout = pool_timeout
+        self.pool_recycle = pool_recycle
         self.engine: Optional[AsyncEngine] = None
         self.async_session_maker: Optional[async_sessionmaker] = None
         
@@ -48,15 +64,16 @@ class DatabaseManager:
                     connect_args={"check_same_thread": False}
                 )
             else:
-                # Для PostgreSQL и других БД
+                # ARCH-003 FIX: PostgreSQL с production connection pooling
                 self.engine = create_async_engine(
                     self.database_url,
                     echo=self.echo,
                     future=True,
-                    pool_size=20,
-                    max_overflow=10,
+                    pool_size=self.pool_size,
+                    max_overflow=self.max_overflow,
+                    pool_timeout=self.pool_timeout,
                     pool_pre_ping=True,  # Проверка соединения перед использованием
-                    pool_recycle=3600    # Обновление соединений каждый час
+                    pool_recycle=self.pool_recycle  # Обновление соединений
                 )
             
             # Создаем фабрику сессий
@@ -171,22 +188,40 @@ class DatabaseManager:
 db_manager: Optional[DatabaseManager] = None
 
 
-async def init_db(database_url: str, echo: bool = False) -> DatabaseManager:
+async def init_db(
+    database_url: str,
+    echo: bool = False,
+    pool_size: int = 20,
+    max_overflow: int = 30,
+    pool_timeout: int = 30,
+    pool_recycle: int = 3600
+) -> DatabaseManager:
     """
     Инициализация глобального менеджера БД
-    
+
     Args:
         database_url: URL подключения к БД
         echo: Выводить SQL запросы в лог
-        
+        pool_size: Размер пула соединений (ARCH-003)
+        max_overflow: Максимальное количество дополнительных соединений
+        pool_timeout: Таймаут ожидания свободного соединения (сек)
+        pool_recycle: Время переиспользования соединения (сек)
+
     Returns:
         DatabaseManager: Инициализированный менеджер БД
     """
     global db_manager
-    
-    db_manager = DatabaseManager(database_url, echo)
+
+    db_manager = DatabaseManager(
+        database_url=database_url,
+        echo=echo,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        pool_recycle=pool_recycle
+    )
     await db_manager.init()
-    
+
     return db_manager
 
 

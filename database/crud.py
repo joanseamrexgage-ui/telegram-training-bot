@@ -871,6 +871,8 @@ async def get_recent_activity(limit: int = 50) -> List[Dict]:
     """
     MVP FEATURE: Получить последние N действий пользователей.
 
+    PERF-001 FIX: Added eager loading to avoid N+1 queries
+
     Args:
         limit: Количество записей для выборки
 
@@ -879,23 +881,25 @@ async def get_recent_activity(limit: int = 50) -> List[Dict]:
     """
     async for session in get_db_session():
         try:
+            # PERF-001 FIX: Use selectinload for eager loading
             stmt = (
-                select(UserActivity, User)
-                .join(User, UserActivity.user_id == User.id)
+                select(UserActivity)
+                .options(selectinload(UserActivity.user))
                 .order_by(desc(UserActivity.timestamp))
                 .limit(limit)
             )
             result = await session.execute(stmt)
-            rows = result.all()
+            activities = result.scalars().all()
 
             # TIMEZONE: Конвертируем timestamp из UTC в московское время (МСК)
+            # PERF-001 FIX: Access user via eager-loaded relationship
             return [
                 {
                     "id": activity.id,
                     "user_id": activity.user_id,
-                    "telegram_id": user.telegram_id,
-                    "username": user.username or "без username",
-                    "first_name": user.first_name or "Пользователь",
+                    "telegram_id": activity.user.telegram_id,
+                    "username": activity.user.username or "без username",
+                    "first_name": activity.user.first_name or "Пользователь",
                     "action": activity.action,
                     "section": activity.section or "-",
                     "subsection": activity.subsection or "-",
@@ -903,7 +907,7 @@ async def get_recent_activity(limit: int = 50) -> List[Dict]:
                     # TIMEZONE: Время отображается в МСК для удобства пользователей
                     "timestamp_str": format_msk_datetime(activity.timestamp) if activity.timestamp else "-"
                 }
-                for activity, user in rows
+                for activity in activities
             ]
         except Exception as e:
             logger.error(f"❌ Ошибка при получении последней активности: {e}", exc_info=True)
@@ -915,6 +919,8 @@ async def get_all_activity_for_export(days: int = 30) -> List[Dict]:
     """
     MVP FEATURE: Получить всю активность за последние N дней для экспорта.
 
+    PERF-001 FIX: Added eager loading to avoid N+1 queries
+
     Args:
         days: Количество дней для выборки
 
@@ -925,23 +931,25 @@ async def get_all_activity_for_export(days: int = 30) -> List[Dict]:
         try:
             cutoff_date = datetime.utcnow() - timedelta(days=days)
 
+            # PERF-001 FIX: Use selectinload for eager loading
             stmt = (
-                select(UserActivity, User)
-                .join(User, UserActivity.user_id == User.id)
+                select(UserActivity)
+                .options(selectinload(UserActivity.user))
                 .where(UserActivity.timestamp >= cutoff_date)
                 .order_by(desc(UserActivity.timestamp))
             )
             result = await session.execute(stmt)
-            rows = result.all()
+            activities = result.scalars().all()
 
             # TIMEZONE: Конвертируем timestamp из UTC в московское время (МСК) для экспорта
+            # PERF-001 FIX: Access user via eager-loaded relationship
             return [
                 {
                     "id": activity.id,
-                    "telegram_id": user.telegram_id,
-                    "username": user.username or "",
-                    "first_name": user.first_name or "",
-                    "last_name": user.last_name or "",
+                    "telegram_id": activity.user.telegram_id,
+                    "username": activity.user.username or "",
+                    "first_name": activity.user.first_name or "",
+                    "last_name": activity.user.last_name or "",
                     "action": activity.action,
                     "section": activity.section or "",
                     "subsection": activity.subsection or "",
@@ -949,7 +957,7 @@ async def get_all_activity_for_export(days: int = 30) -> List[Dict]:
                     # TIMEZONE: Время экспорта в МСК для удобства чтения администраторами
                     "timestamp": format_msk_datetime(activity.timestamp) if activity.timestamp else ""
                 }
-                for activity, user in rows
+                for activity in activities
             ]
         except Exception as e:
             logger.error(f"❌ Ошибка при получении активности для экспорта: {e}", exc_info=True)
