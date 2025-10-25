@@ -1,0 +1,272 @@
+version: '3.8'
+
+# Production-ready Docker Compose configuration for telegram-training-bot
+# Includes: Bot, PostgreSQL, Redis Sentinel HA cluster, Prometheus, Grafana
+
+services:
+  # ==================== APPLICATION ====================
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: training-bot
+    environment:
+      # Database
+      - DATABASE_URL=postgresql+asyncpg://botuser:${DB_PASSWORD}@postgres:5432/training_bot
+
+      # Redis Sentinel HA
+      - REDIS_SENTINEL_NODES=redis-sentinel1:26379,redis-sentinel2:26379,redis-sentinel3:26379
+      - REDIS_MASTER_NAME=mymaster
+      - REDIS_FSM_DB=0
+      - REDIS_THROTTLE_DB=1
+
+      # Telegram Bot
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH}
+
+      # Monitoring
+      - SENTRY_DSN=${SENTRY_DSN}
+      - ENVIRONMENT=production
+
+      # Performance
+      - REQUEST_TIMEOUT=30
+      - MAX_CONCURRENT_TASKS=1000
+
+    depends_on:
+      - postgres
+      - redis-master
+      - redis-sentinel1
+      - redis-sentinel2
+      - redis-sentinel3
+    networks:
+      - bot_network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ==================== DATABASE ====================
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-bot
+    environment:
+      POSTGRES_DB: training_bot
+      POSTGRES_USER: botuser
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    networks:
+      - bot_network
+    restart: unless-stopped
+    command: |
+      postgres
+      -c max_connections=100
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U botuser -d training_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== REDIS SENTINEL HA CLUSTER ====================
+  redis-master:
+    image: redis:7-alpine
+    container_name: redis-master
+    command: redis-server --appendonly yes --replica-read-only no
+    volumes:
+      - redis_master_data:/data
+    networks:
+      - bot_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis-slave1:
+    image: redis:7-alpine
+    container_name: redis-slave1
+    command: redis-server --appendonly yes --replicaof redis-master 6379
+    volumes:
+      - redis_slave1_data:/data
+    depends_on:
+      - redis-master
+    networks:
+      - bot_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis-slave2:
+    image: redis:7-alpine
+    container_name: redis-slave2
+    command: redis-server --appendonly yes --replicaof redis-master 6379
+    volumes:
+      - redis_slave2_data:/data
+    depends_on:
+      - redis-master
+    networks:
+      - bot_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis-sentinel1:
+    image: redis:7-alpine
+    container_name: redis-sentinel1
+    command: >
+      sh -c "echo 'port 26379
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel down-after-milliseconds mymaster 10000
+      sentinel parallel-syncs mymaster 1
+      sentinel failover-timeout mymaster 60000
+      sentinel deny-scripts-reconfig yes' > /tmp/sentinel.conf &&
+      redis-sentinel /tmp/sentinel.conf
+      --sentinel announce-hostnames yes
+      --sentinel resolve-hostnames yes"
+    depends_on:
+      - redis-master
+    networks:
+      - bot_network
+    restart: unless-stopped
+
+  redis-sentinel2:
+    image: redis:7-alpine
+    container_name: redis-sentinel2
+    command: >
+      sh -c "echo 'port 26379
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel down-after-milliseconds mymaster 10000
+      sentinel parallel-syncs mymaster 1
+      sentinel failover-timeout mymaster 60000
+      sentinel deny-scripts-reconfig yes' > /tmp/sentinel.conf &&
+      redis-sentinel /tmp/sentinel.conf
+      --sentinel announce-hostnames yes
+      --sentinel resolve-hostnames yes"
+    depends_on:
+      - redis-master
+    networks:
+      - bot_network
+    restart: unless-stopped
+
+  redis-sentinel3:
+    image: redis:7-alpine
+    container_name: redis-sentinel3
+    command: >
+      sh -c "echo 'port 26379
+      sentinel monitor mymaster redis-master 6379 2
+      sentinel down-after-milliseconds mymaster 10000
+      sentinel parallel-syncs mymaster 1
+      sentinel failover-timeout mymaster 60000
+      sentinel deny-scripts-reconfig yes' > /tmp/sentinel.conf &&
+      redis-sentinel /tmp/sentinel.conf
+      --sentinel announce-hostnames yes
+      --sentinel resolve-hostnames yes"
+    depends_on:
+      - redis-master
+    networks:
+      - bot_network
+    restart: unless-stopped
+
+  # ==================== MONITORING ====================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=30d'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - bot_network
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=redis-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - bot_network
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# ==================== VOLUMES ====================
+volumes:
+  postgres_data:
+    driver: local
+  redis_master_data:
+    driver: local
+  redis_slave1_data:
+    driver: local
+  redis_slave2_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+# ==================== NETWORKS ====================
+networks:
+  bot_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
