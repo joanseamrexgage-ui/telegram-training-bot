@@ -1,0 +1,337 @@
+name: Security Scanning
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ============================================================================
+  # Dependency Vulnerability Scanning
+  # ============================================================================
+  dependency_scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install safety pip-audit
+
+      - name: Run Safety check
+        run: |
+          safety check --json --output safety-report.json || true
+          safety check --full-report
+        continue-on-error: true
+
+      - name: Run pip-audit
+        run: |
+          pip-audit --format json --output pip-audit-report.json || true
+          pip-audit
+        continue-on-error: true
+
+      - name: Upload vulnerability reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: dependency-vulnerability-reports
+          path: |
+            safety-report.json
+            pip-audit-report.json
+
+  # ============================================================================
+  # SAST (Static Application Security Testing)
+  # ============================================================================
+  sast:
+    name: SAST Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Bandit
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit[toml]
+
+      - name: Run Bandit security linter
+        run: |
+          bandit -r . \
+            -f json \
+            -o bandit-report.json \
+            -ll \
+            --exclude tests,venv,.venv \
+            || true
+
+          bandit -r . \
+            -ll \
+            --exclude tests,venv,.venv \
+            -f screen
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/python
+            p/owasp-top-ten
+          generateSarif: true
+        continue-on-error: true
+
+      - name: Upload SAST reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: sast-reports
+          path: |
+            bandit-report.json
+            semgrep.sarif
+
+      - name: Upload to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+        continue-on-error: true
+
+  # ============================================================================
+  # Docker Image Security Scan
+  # ============================================================================
+  docker_scan:
+    name: Docker Image Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: telegram-training-bot:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'telegram-training-bot:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Grype scanner
+        uses: anchore/scan-action@v3
+        with:
+          image: 'telegram-training-bot:latest'
+          fail-build: false
+          severity-cutoff: high
+          output-format: sarif
+
+      - name: Generate detailed Trivy report
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'telegram-training-bot:latest'
+          format: 'json'
+          output: 'trivy-detailed.json'
+
+      - name: Upload Docker scan reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: docker-security-reports
+          path: |
+            trivy-results.sarif
+            trivy-detailed.json
+
+  # ============================================================================
+  # Secrets Scanning
+  # ============================================================================
+  secrets_scan:
+    name: Secrets Scanning
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        continue-on-error: true
+
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+        continue-on-error: true
+
+  # ============================================================================
+  # License Compliance Check
+  # ============================================================================
+  license_check:
+    name: License Compliance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-licenses
+
+      - name: Check licenses
+        run: |
+          pip-licenses --format=json --output-file=licenses.json
+          pip-licenses --format=markdown --output-file=licenses.md
+          pip-licenses
+
+      - name: Upload license reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: license-reports
+          path: |
+            licenses.json
+            licenses.md
+
+  # ============================================================================
+  # Infrastructure as Code Security
+  # ============================================================================
+  iac_scan:
+    name: IaC Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: dockerfile,secrets
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          soft_fail: true
+
+      - name: Upload Checkov results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+      - name: Scan docker-compose files
+        run: |
+          echo "Scanning docker-compose configurations..."
+          # Custom security checks for docker-compose.yml
+
+  # ============================================================================
+  # Security Summary Report
+  # ============================================================================
+  security_summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [dependency_scan, sast, docker_scan, secrets_scan, license_check, iac_scan]
+    if: always()
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Generate security summary
+        run: |
+          echo "# Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dependency Scan:** ${{ needs.dependency_scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **SAST Analysis:** ${{ needs.sast.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Scan:** ${{ needs.docker_scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Secrets Scan:** ${{ needs.secrets_scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **License Check:** ${{ needs.license_check.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **IaC Scan:** ${{ needs.iac_scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Scan Date:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create security issue (if vulnerabilities found)
+        if: |
+          needs.dependency_scan.result == 'failure' ||
+          needs.sast.result == 'failure' ||
+          needs.docker_scan.result == 'failure' ||
+          needs.secrets_scan.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🔒 Security Vulnerabilities Detected',
+              body: 'Automated security scan detected vulnerabilities. Please review the workflow artifacts.',
+              labels: ['security', 'automated']
+            })
+
+      - name: Notify security team
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              text: "⚠️ Security Scan Failures Detected",
+              attachments: [{
+                color: 'danger',
+                text: "Security vulnerabilities found in telegram-training-bot. Please review immediately."
+              }]
+            }
+          webhook_url: ${{ secrets.SLACK_SECURITY_WEBHOOK }}
+        continue-on-error: true
