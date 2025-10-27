@@ -1,0 +1,30 @@
+name: MyMiniMaxConfig
+version: 1.0.0
+schema: v1
+
+models:
+  - name: minimax-m2-openrouter
+    provider: openai
+    model: minimax/minimax-m2:free
+    apiKey: sk-or-...твой_ключ...
+    apiBase: https://openrouter.ai/api/v1
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      temperature: 1.0
+      maxTokens: 2048
+
+# Если хочешь использовать автокомплит:
+#    roles:
+#      - chat
+#      - edit
+#      - apply
+#      - autocomplete
+#    autocompleteOptions:
+#      debounceDelay: 350
+#      maxPromptTokens: 1024
+#      onlyMyCode: true
+
+# MCP-server и другие секции опциональны, если не нужны — можно их не указывать.
