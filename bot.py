@@ -244,8 +244,18 @@ async def main():
     except Exception as e:
         logger.error(
             f"⚠️ Throttling Middleware НЕДОСТУПЕН: {e}\n"
-            f"   Бот НЕ защищен от спама!"
+            f"   Fallback на Memory Throttling (защита от спама упрощена)"
         )
+        # Fallback на in-memory throttling без Redis
+        from middlewares.throttling import ThrottlingMiddleware
+        throttling_middleware = ThrottlingMiddleware(
+            default_rate=3.0,    # Более строгий лимит без Redis
+            max_warnings=3,      # Меньше предупреждений
+            block_duration=120   # Дольше блокировка
+        )
+        dp.message.middleware(throttling_middleware)
+        dp.callback_query.middleware(throttling_middleware)
+        logger.info("✅ Memory Throttling Middleware активирован (fallback mode)")
 
     # 2. Auth Middleware - авторизация пользователей
     dp.message.middleware(AuthMiddleware())
