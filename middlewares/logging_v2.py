@@ -356,7 +356,7 @@ class AsyncLoggingMiddleware(BaseMiddleware):
                 if cleaned > 0:
                     logger.debug(
                         f"🧹 Task cleanup: {cleaned} completed tasks removed\n"
-                        f"   Active tasks: {self.task_manager.get_active_task_count()}"
+                        f"   Active tasks: {len(self.task_manager._active_tasks)}"
                     )
             except Exception as e:
                 logger.error(f"❌ Task cleanup failed: {e}")
