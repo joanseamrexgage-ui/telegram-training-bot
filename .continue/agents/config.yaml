@@ -6,7 +6,7 @@ models:
   - name: minimax-m2-openrouter
     provider: openai
     model: minimax/minimax-m2:free
-    apiKey: sk-or-...твой_ключ...
+    apiKey: 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
     apiBase: https://openrouter.ai/api/v1
     roles:
       - chat
