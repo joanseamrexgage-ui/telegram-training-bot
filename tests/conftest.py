@@ -280,3 +280,92 @@ async def cleanup():
     yield
     # Cleanup code here if needed
     await asyncio.sleep(0)  # Allow pending tasks to complete
+
+
+# ==================== MIDDLEWARE TEST FIXTURES ====================
+
+@pytest.fixture
+def aiogram_message():
+    """
+    Create real aiogram Message instance for middleware testing.
+    
+    Middlewares use isinstance() checks that fail with MagicMock.
+    """
+    from aiogram.types import Message, User, Chat
+    
+    # Create User
+    user = User(
+        id=12345,
+        is_bot=False,
+        first_name="Test",
+        last_name="User",
+        username="testuser"
+    )
+    
+    # Create Chat
+    chat = Chat(
+        id=12345,
+        type="private"
+    )
+    
+    # Create Message
+    message = Message(
+        message_id=1,
+        date=datetime.utcnow(),
+        chat=chat,
+        from_user=user,
+        text="/start"
+    )
+    
+    # Add async mock methods
+    message.answer = AsyncMock(return_value=MagicMock(message_id=2))
+    message.reply = AsyncMock(return_value=MagicMock(message_id=3))
+    message.delete = AsyncMock(return_value=True)
+    
+    return message
+
+
+@pytest.fixture
+def aiogram_callback_query():
+    """
+    Create real aiogram CallbackQuery instance for middleware testing.
+    """
+    from aiogram.types import CallbackQuery, User, Message, Chat
+    
+    # Create User
+    user = User(
+        id=12345,
+        is_bot=False,
+        first_name="Test",
+        last_name="User",
+        username="testuser"
+    )
+    
+    # Create Chat
+    chat = Chat(
+        id=12345,
+        type="private"
+    )
+    
+    # Create Message for callback
+    message = Message(
+        message_id=1,
+        date=datetime.utcnow(),
+        chat=chat
+    )
+    message.edit_text = AsyncMock(return_value=True)
+    message.delete = AsyncMock(return_value=True)
+    
+    # Create CallbackQuery
+    callback = CallbackQuery(
+        id="callback_1",
+        from_user=user,
+        chat_instance="instance_1",
+        data="test_callback",
+        message=message
+    )
+    
+    # Add async mock methods
+    callback.answer = AsyncMock(return_value=True)
+    
+    return callback
