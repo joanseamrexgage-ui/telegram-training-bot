@@ -57,7 +57,7 @@ class TestTimeoutNormalExecution:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_fast_handler_allowed(self, mock_message):
+    async def test_fast_handler_allowed(self, aiogram_message):
         """Test that fast handlers execute normally"""
         middleware = TimeoutMiddleware(timeout=5)
 
@@ -65,7 +65,7 @@ class TestTimeoutNormalExecution:
             await asyncio.sleep(0.1)
             return "result"
 
-        result = await middleware(fast_handler, mock_message, {})
+        result = await middleware(fast_handler, aiogram_message, {})
 
         assert result == "result"
         assert middleware.stats["total_requests"] == 1
@@ -73,7 +73,7 @@ class TestTimeoutNormalExecution:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_statistics_tracking(self, mock_message):
+    async def test_statistics_tracking(self, aiogram_message):
         """Test that execution statistics are tracked"""
         middleware = TimeoutMiddleware(timeout=5)
 
@@ -83,7 +83,7 @@ class TestTimeoutNormalExecution:
 
         # Execute multiple requests
         for _ in range(3):
-            await middleware(handler, mock_message, {})
+            await middleware(handler, aiogram_message, {})
 
         stats = middleware.get_stats()
         assert stats["total_requests"] == 3
@@ -92,7 +92,7 @@ class TestTimeoutNormalExecution:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_execution_time_tracking(self, mock_message):
+    async def test_execution_time_tracking(self, aiogram_message):
         """Test that execution time is properly tracked"""
         middleware = TimeoutMiddleware(timeout=5)
 
@@ -100,7 +100,7 @@ class TestTimeoutNormalExecution:
             await asyncio.sleep(0.2)
             return "ok"
 
-        await middleware(handler, mock_message, {})
+        await middleware(handler, aiogram_message, {})
 
         assert middleware.stats["total_execution_time"] >= 0.2
         stats = middleware.get_stats()
@@ -112,7 +112,7 @@ class TestTimeoutDetection:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_slow_handler_times_out(self, mock_message):
+    async def test_slow_handler_times_out(self, aiogram_message):
         """Test that slow handlers trigger timeout"""
         middleware = TimeoutMiddleware(timeout=1)
 
@@ -120,7 +120,7 @@ class TestTimeoutDetection:
             await asyncio.sleep(2)  # Exceed timeout
             return "should_not_return"
 
-        result = await middleware(slow_handler, mock_message, {})
+        result = await middleware(slow_handler, aiogram_message, {})
 
         assert result is None  # Timeout returns None
         assert middleware.stats["timeouts"] == 1
@@ -128,41 +128,41 @@ class TestTimeoutDetection:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_timeout_message_sent_to_user(self, mock_message):
+    async def test_timeout_message_sent_to_user(self, aiogram_message):
         """Test that user receives timeout notification (Message)"""
         middleware = TimeoutMiddleware(timeout=1)
 
         async def slow_handler(event, data):
             await asyncio.sleep(2)
 
-        await middleware(slow_handler, mock_message, {})
+        await middleware(slow_handler, aiogram_message, {})
 
         # Verify timeout message was sent
-        mock_message.answer.assert_called_once()
-        timeout_msg = mock_message.answer.call_args[0][0]
+        aiogram_message.answer.assert_called_once()
+        timeout_msg = aiogram_message.answer.call_args[0][0]
         assert "⚠️" in timeout_msg
         assert "Время обработки превышено" in timeout_msg
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_timeout_callback_alert(self, mock_callback_query):
+    async def test_timeout_callback_alert(self, aiogram_callback_query):
         """Test that callback query receives timeout alert"""
         middleware = TimeoutMiddleware(timeout=1)
 
         async def slow_handler(event, data):
             await asyncio.sleep(2)
 
-        await middleware(slow_handler, mock_callback_query, {})
+        await middleware(slow_handler, aiogram_callback_query, {})
 
         # Verify alert was sent
-        mock_callback_query.answer.assert_called_once()
-        call_args = mock_callback_query.answer.call_args
+        aiogram_callback_query.answer.assert_called_once()
+        call_args = aiogram_callback_query.answer.call_args
         assert "Timeout" in call_args[0][0]
         assert call_args[1]['show_alert'] is True
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_multiple_timeouts_tracked(self, mock_message):
+    async def test_multiple_timeouts_tracked(self, aiogram_message):
         """Test that multiple timeouts are properly counted"""
         middleware = TimeoutMiddleware(timeout=1)
 
@@ -171,7 +171,7 @@ class TestTimeoutDetection:
 
         # Execute multiple slow requests
         for _ in range(3):
-            await middleware(slow_handler, mock_message, {})
+            await middleware(slow_handler, aiogram_message, {})
 
         assert middleware.stats["timeouts"] == 3
         assert middleware.stats["total_requests"] == 3
@@ -185,7 +185,7 @@ class TestSlowHandlerWarning:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_slow_handler_logged(self, mock_message):
+    async def test_slow_handler_logged(self, aiogram_message):
         """Test that handlers exceeding 50% threshold are logged"""
         middleware = TimeoutMiddleware(timeout=2)
 
@@ -194,7 +194,7 @@ class TestSlowHandlerWarning:
             return "result"
 
         with patch('middlewares.timeout.logger') as mock_logger:
-            result = await middleware(slow_handler, mock_message, {})
+            result = await middleware(slow_handler, aiogram_message, {})
 
             # Handler should complete but be logged as slow
             assert result == "result"
@@ -205,7 +205,7 @@ class TestSlowHandlerWarning:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_fast_handler_not_logged(self, mock_message):
+    async def test_fast_handler_not_logged(self, aiogram_message):
         """Test that fast handlers (<50% threshold) are not logged as slow"""
         middleware = TimeoutMiddleware(timeout=2)
 
@@ -214,7 +214,7 @@ class TestSlowHandlerWarning:
             return "result"
 
         with patch('middlewares.timeout.logger') as mock_logger:
-            await middleware(fast_handler, mock_message, {})
+            await middleware(fast_handler, aiogram_message, {})
 
             # Should NOT log warning for fast handler
             warning_calls = [
@@ -287,7 +287,7 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_handler_exception_propagated(self, mock_message):
+    async def test_handler_exception_propagated(self, aiogram_message):
         """Test that handler exceptions are propagated (not swallowed)"""
         middleware = TimeoutMiddleware(timeout=5)
 
@@ -295,11 +295,11 @@ class TestErrorHandling:
             raise ValueError("Handler error")
 
         with pytest.raises(ValueError, match="Handler error"):
-            await middleware(failing_handler, mock_message, {})
+            await middleware(failing_handler, aiogram_message, {})
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_exception_logged_with_details(self, mock_message):
+    async def test_exception_logged_with_details(self, aiogram_message):
         """Test that exceptions are logged with handler details"""
         middleware = TimeoutMiddleware(timeout=5)
 
@@ -308,7 +308,7 @@ class TestErrorHandling:
 
         with patch('middlewares.timeout.logger') as mock_logger:
             with pytest.raises(RuntimeError):
-                await middleware(failing_handler, mock_message, {})
+                await middleware(failing_handler, aiogram_message, {})
 
             # Verify error was logged
             mock_logger.error.assert_called()
@@ -317,7 +317,7 @@ class TestErrorHandling:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_message_send_error_handled(self, mock_message):
+    async def test_message_send_error_handled(self, aiogram_message):
         """Test that errors sending timeout message don't crash middleware"""
         middleware = TimeoutMiddleware(timeout=1)
 
@@ -325,10 +325,10 @@ class TestErrorHandling:
             await asyncio.sleep(2)
 
         # Make answer() fail
-        mock_message.answer = AsyncMock(side_effect=Exception("Send failed"))
+        aiogram_message.answer = AsyncMock(side_effect=Exception("Send failed"))
 
         # Should not raise exception
-        result = await middleware(slow_handler, mock_message, {})
+        result = await middleware(slow_handler, aiogram_message, {})
         assert result is None  # Timeout still processed
 
 
@@ -401,7 +401,7 @@ class TestPerformanceMonitoring:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_average_execution_time_calculation(self, mock_message):
+    async def test_average_execution_time_calculation(self, aiogram_message):
         """Test average execution time is calculated correctly"""
         middleware = TimeoutMiddleware(timeout=5)
 
@@ -413,8 +413,8 @@ class TestPerformanceMonitoring:
             await asyncio.sleep(0.3)
             return "ok"
 
-        await middleware(handler1, mock_message, {})
-        await middleware(handler2, mock_message, {})
+        await middleware(handler1, aiogram_message, {})
+        await middleware(handler2, aiogram_message, {})
 
         stats = middleware.get_stats()
         # Average should be around 0.2 (0.1 + 0.3) / 2
@@ -422,7 +422,7 @@ class TestPerformanceMonitoring:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_stats_after_mixed_results(self, mock_message):
+    async def test_stats_after_mixed_results(self, aiogram_message):
         """Test statistics after mix of successful and timed out requests"""
         middleware = TimeoutMiddleware(timeout=1)
 
@@ -434,9 +434,9 @@ class TestPerformanceMonitoring:
             await asyncio.sleep(2)
 
         # Mix of fast and slow
-        await middleware(fast_handler, mock_message, {})
-        await middleware(slow_handler, mock_message, {})
-        await middleware(fast_handler, mock_message, {})
+        await middleware(fast_handler, aiogram_message, {})
+        await middleware(slow_handler, aiogram_message, {})
+        await middleware(fast_handler, aiogram_message, {})
 
         stats = middleware.get_stats()
         assert stats["total_requests"] == 3
