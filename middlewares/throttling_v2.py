@@ -289,7 +289,8 @@ class ThrottlingMiddlewareV2(BaseMiddleware):
     def __init__(
         self,
         redis: Redis,
-        config: Optional[RateLimitConfig] = None
+        config: Optional[RateLimitConfig] = None,
+        admin_ids: Optional[list[int]] = None
     ):
         """
         Initialize throttling middleware
@@ -297,10 +298,12 @@ class ThrottlingMiddlewareV2(BaseMiddleware):
         Args:
             redis: Redis client instance
             config: Rate limit configuration (uses defaults if None)
+            admin_ids: List of admin user IDs to bypass rate limiting
         """
         super().__init__()
         self.redis = redis
         self.config = config or RateLimitConfig()
+        self.admin_ids = set(admin_ids or [])  # Use set for O(1) lookup
         self.token_bucket = RedisTokenBucket(redis, self.config)
 
         logger.info(
@@ -308,7 +311,8 @@ class ThrottlingMiddlewareV2(BaseMiddleware):
             f"   Max tokens: {self.config.max_tokens}\n"
             f"   Refill rate: {self.config.refill_rate} tokens/sec\n"
             f"   Violation threshold: {self.config.violation_threshold}\n"
-            f"   Block duration: {self.config.block_duration}s"
+            f"   Block duration: {self.config.block_duration}s\n"
+            f"   Admin bypass: {len(self.admin_ids)} admins"
         )
 
     async def __call__(
@@ -341,6 +345,11 @@ class ThrottlingMiddlewareV2(BaseMiddleware):
             return await handler(event, data)
 
         user_id = user.id
+
+        # UX-001 FIX: Bypass rate limiting for admins (no throttling)
+        if user_id in self.admin_ids:
+            logger.debug(f"🔓 Admin {user_id} bypassed rate limiting")
+            return await handler(event, data)
 
         # Try to consume token
         allowed, error_message = await self.token_bucket.consume_token(user_id)
@@ -381,7 +390,8 @@ async def create_redis_throttling(
     max_tokens: int = 5,
     refill_rate: float = 0.5,
     violation_threshold: int = 3,
-    block_duration: int = 60
+    block_duration: int = 60,
+    admin_ids: Optional[list[int]] = None
 ) -> ThrottlingMiddlewareV2:
     """
     Factory function to create ThrottlingMiddlewareV2 with Redis
@@ -392,6 +402,7 @@ async def create_redis_throttling(
         refill_rate: Tokens per second refill rate
         violation_threshold: Violations before block
         block_duration: Block duration in seconds
+        admin_ids: List of admin user IDs to bypass rate limiting
 
     Returns:
         Configured ThrottlingMiddlewareV2 instance
@@ -400,7 +411,8 @@ async def create_redis_throttling(
         throttling = await create_redis_throttling(
             redis_url="redis://redis:6379/0",
             max_tokens=10,
-            refill_rate=1.0
+            refill_rate=1.0,
+            admin_ids=[123456789]
         )
     """
     try:
@@ -427,8 +439,12 @@ async def create_redis_throttling(
             block_duration=block_duration
         )
 
-        # Create middleware
-        return ThrottlingMiddlewareV2(redis=redis_client, config=config)
+        # Create middleware with admin bypass support
+        return ThrottlingMiddlewareV2(
+            redis=redis_client,
+            config=config,
+            admin_ids=admin_ids
+        )
 
     except RedisConnectionError as e:
         logger.critical(
