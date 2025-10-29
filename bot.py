@@ -209,16 +209,18 @@ async def main():
             throttle_redis = await throttle_manager.get_redis()
 
             # Create middleware with Sentinel-backed Redis
+            # UX-001 FIX: "Invisible" throttling - user-friendly rate limits
             throttle_config = RateLimitConfig(
-                max_tokens=5,
-                refill_rate=0.5,
-                violation_threshold=3,
-                block_duration=60
+                max_tokens=15,              # Burst: 15 requests (was: 5)
+                refill_rate=2.0,           # Recovery: 2 req/sec (was: 0.5)
+                violation_threshold=8,      # Warnings: 8 (was: 3)
+                block_duration=10          # Block: 10 sec (was: 60)
             )
 
             throttling_middleware = ThrottlingMiddlewareV2(
                 redis=throttle_redis,
-                config=throttle_config
+                config=throttle_config,
+                admin_ids=config.tg_bot.admin_ids  # UX-001: Admins bypass rate limiting
             )
 
             dp.message.middleware(throttling_middleware)
@@ -232,12 +234,14 @@ async def main():
 
         else:
             # Simple Redis mode (development)
+            # UX-001 FIX: "Invisible" throttling - user-friendly rate limits
             throttling_middleware = await create_redis_throttling(
                 redis_url=f"{config.redis.url}/{config.redis.throttle_db}",
-                max_tokens=5,        # Burst capacity: 5 requests
-                refill_rate=0.5,     # Sustained: 1 req per 2 seconds
-                violation_threshold=3,
-                block_duration=60
+                max_tokens=15,              # Burst: 15 requests (was: 5)
+                refill_rate=2.0,           # Recovery: 2 req/sec (was: 0.5)
+                violation_threshold=8,      # Warnings: 8 (was: 3)
+                block_duration=10,         # Block: 10 sec (was: 60)
+                admin_ids=config.tg_bot.admin_ids  # UX-001: Admins bypass rate limiting
             )
             dp.message.middleware(throttling_middleware)
             dp.callback_query.middleware(throttling_middleware)
