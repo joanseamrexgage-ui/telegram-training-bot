@@ -36,6 +36,7 @@ from middlewares.logging_v2 import AsyncLoggingMiddleware  # CRIT-004 FIX: v2.0
 from middlewares.throttling_v2 import create_redis_throttling, RateLimitConfig  # CRIT-002 FIX: v2.0
 from middlewares.errors import ErrorHandlingMiddleware  # VERSION 2.0
 from middlewares.timeout import TimeoutMiddleware  # HIGH-004 FIX: Timeout protection
+from middlewares.input_sanitizer import InputSanitizerMiddleware  # TASK 1.3: Input validation
 from utils.logger import logger
 # PRODUCTION MONITORING: Sentry integration for error tracking
 from utils.sentry_config import init_sentry
@@ -172,11 +173,12 @@ async def main():
     # Порядок выполнения КРИТИЧЕСКИ ВАЖЕН для безопасности и производительности!
     #
     # Execution Order (outer → inner):
-    # 0. Timeout       → Предотвращает зависание event loop (защита от DoS)
-    # 1. Throttling    → Блокирует спам ДО любой обработки (защита ресурсов)
-    # 2. Auth          → Аутентифицирует пользователя (требует DB)
-    # 3. ErrorHandling → Ловит ошибки из handlers и внутренних middleware
-    # 4. Logging       → Логирует УСПЕШНЫЕ запросы (после всех проверок)
+    # 0. Timeout         → Предотвращает зависание event loop (защита от DoS)
+    # 1. Throttling      → Блокирует спам ДО любой обработки (защита ресурсов)
+    # 2. InputSanitizer  → Очищает пользовательский ввод (защита от XSS/injection)
+    # 3. Auth            → Аутентифицирует пользователя (требует DB)
+    # 4. ErrorHandling   → Ловит ошибки из handlers и внутренних middleware
+    # 5. Logging         → Логирует УСПЕШНЫЕ запросы (после всех проверок)
     #
     # НИКОГДА НЕ МЕНЯЙТЕ ПОРЯДОК БЕЗ ПОЛНОГО ПОНИМАНИЯ ПОСЛЕДСТВИЙ!
     # См. tests/test_middleware_order.py для автоматической проверки
@@ -247,15 +249,26 @@ async def main():
             f"   Бот НЕ защищен от спама!"
         )
 
-    # 2. Auth Middleware - авторизация пользователей
+    # 2. TASK 1.3: Input Sanitizer Middleware - автоматическая очистка ввода
+    input_sanitizer = InputSanitizerMiddleware(
+        max_text_length=4096,      # Telegram message limit
+        max_callback_length=64,    # Callback data limit
+        enable_logging=True,
+        enable_stats=True
+    )
+    dp.message.middleware(input_sanitizer)
+    dp.callback_query.middleware(input_sanitizer)
+    logger.info("✅ Input Sanitizer Middleware активирован (XSS/injection protection)")
+
+    # 3. Auth Middleware - авторизация пользователей
     dp.message.middleware(AuthMiddleware())
     dp.callback_query.middleware(AuthMiddleware())
 
-    # 3. Error Handling Middleware - обработка ошибок
+    # 4. Error Handling Middleware - обработка ошибок
     dp.message.middleware(ErrorHandlingMiddleware())
     dp.callback_query.middleware(ErrorHandlingMiddleware())
 
-    # 4. BLOCKER-004 & CRIT-004 FIX: Async Logging Middleware (non-blocking + memory safe)
+    # 5. BLOCKER-004 & CRIT-004 FIX: Async Logging Middleware (non-blocking + memory safe)
     async_logging = AsyncLoggingMiddleware(
         enable_performance_tracking=True,
         max_concurrent_tasks=500,  # BLOCKER-004: Prevent unbounded task growth
