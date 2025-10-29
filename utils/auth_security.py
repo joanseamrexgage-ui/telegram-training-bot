@@ -48,8 +48,12 @@ class AuthSecurity:
             blocked_until is None if not blocked
         """
         # Validate user_id (fail-safe for invalid inputs)
-        if user_id is None or user_id <= 0:
-            logger.warning(f"⚠️ Invalid user_id for password attempt: {user_id}")
+        try:
+            if user_id is None or not isinstance(user_id, int) or user_id <= 0:
+                logger.warning(f"⚠️ Invalid user_id for password attempt: {user_id}")
+                return 0, None
+        except (TypeError, ValueError):
+            logger.warning(f"⚠️ Invalid user_id type for password attempt: {type(user_id)}")
             return 0, None
 
         key = f"admin:password_attempts:{user_id}"
