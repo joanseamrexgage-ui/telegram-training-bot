@@ -54,13 +54,13 @@ class TestThrottlingAllowedRequests:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_first_request_allowed(self, mock_message):
+    async def test_first_request_allowed(self, aiogram_message):
         """Test that first request from user is always allowed"""
         middleware = ThrottlingMiddleware(default_rate=2.0)
         handler = AsyncMock(return_value="result")
         data = {}
 
-        result = await middleware(handler, mock_message, data)
+        result = await middleware(handler, aiogram_message, data)
 
         handler.assert_called_once()
         assert result == "result"
@@ -68,21 +68,21 @@ class TestThrottlingAllowedRequests:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_properly_spaced_requests_allowed(self, mock_message):
+    async def test_properly_spaced_requests_allowed(self, aiogram_message):
         """Test that properly spaced requests are allowed"""
         middleware = ThrottlingMiddleware(default_rate=0.1)  # 0.1s for faster test
         handler = AsyncMock(return_value="result")
         data = {}
 
         # First request
-        result1 = await middleware(handler, mock_message, data)
+        result1 = await middleware(handler, aiogram_message, data)
         assert result1 == "result"
 
         # Wait longer than rate limit
         await asyncio.sleep(0.15)
 
         # Second request should be allowed
-        result2 = await middleware(handler, mock_message, data)
+        result2 = await middleware(handler, aiogram_message, data)
         assert result2 == "result"
         assert handler.call_count == 2
 
@@ -108,65 +108,65 @@ class TestThrottlingWarnings:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_rapid_request_triggers_warning(self, mock_message):
+    async def test_rapid_request_triggers_warning(self, aiogram_message):
         """Test that rapid requests trigger warnings"""
         middleware = ThrottlingMiddleware(default_rate=2.0, max_warnings=5)
         handler = AsyncMock()
         data = {}
 
         # First request - allowed
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
 
         # Immediate second request - should warn
-        result = await middleware(handler, mock_message, data)
+        result = await middleware(handler, aiogram_message, data)
 
         assert result is None  # Blocked
-        mock_message.answer.assert_called_once()
+        aiogram_message.answer.assert_called_once()
 
         # Verify warning message
-        warning_msg = mock_message.answer.call_args[0][0]
+        warning_msg = aiogram_message.answer.call_args[0][0]
         assert "⚠️" in warning_msg
         assert "Подождите" in warning_msg
         assert "1/5" in warning_msg  # First warning
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_warning_counter_increments(self, mock_message):
+    async def test_warning_counter_increments(self, aiogram_message):
         """Test that warning counter increments correctly"""
         middleware = ThrottlingMiddleware(default_rate=2.0, max_warnings=5)
         handler = AsyncMock()
         data = {}
 
-        user_id = mock_message.from_user.id
+        user_id = aiogram_message.from_user.id
 
         # First request - allowed
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
 
         # Rapid requests to accumulate warnings
         for i in range(1, 4):  # 3 rapid requests
-            await middleware(handler, mock_message, data)
+            await middleware(handler, aiogram_message, data)
             assert middleware.warnings[user_id] == i
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_warning_decay_on_good_behavior(self, mock_message):
+    async def test_warning_decay_on_good_behavior(self, aiogram_message):
         """Test that warnings decrease when user behaves properly"""
         middleware = ThrottlingMiddleware(default_rate=0.1)
         handler = AsyncMock()
         data = {}
 
-        user_id = mock_message.from_user.id
+        user_id = aiogram_message.from_user.id
 
         # First request
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
 
         # Rapid request to get warning
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
         assert middleware.warnings[user_id] == 1
 
         # Wait and make proper request
         await asyncio.sleep(0.15)
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
 
         # Warning should have decreased
         assert middleware.warnings[user_id] == 0
@@ -177,7 +177,7 @@ class TestThrottlingBlocking:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_max_warnings_triggers_block(self, mock_message):
+    async def test_max_warnings_triggers_block(self, aiogram_message):
         """Test that reaching max warnings blocks user"""
         middleware = ThrottlingMiddleware(
             default_rate=2.0,
@@ -187,14 +187,14 @@ class TestThrottlingBlocking:
         handler = AsyncMock()
         data = {}
 
-        user_id = mock_message.from_user.id
+        user_id = aiogram_message.from_user.id
 
         # First request - allowed
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
 
         # Make max_warnings rapid requests
         for _ in range(3):
-            await middleware(handler, mock_message, data)
+            await middleware(handler, aiogram_message, data)
 
         # User should now be blocked
         assert user_id in middleware.blocked_users
@@ -202,7 +202,7 @@ class TestThrottlingBlocking:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_blocked_user_receives_block_message(self, mock_message):
+    async def test_blocked_user_receives_block_message(self, aiogram_message):
         """Test that blocked users receive block notification"""
         middleware = ThrottlingMiddleware(
             default_rate=2.0,
@@ -213,22 +213,22 @@ class TestThrottlingBlocking:
         data = {}
 
         # Trigger block
-        await middleware(handler, mock_message, data)
-        await middleware(handler, mock_message, data)
-        result = await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
+        await middleware(handler, aiogram_message, data)
+        result = await middleware(handler, aiogram_message, data)
 
         assert result is None
-        mock_message.answer.assert_called()
+        aiogram_message.answer.assert_called()
 
         # Verify block message
-        block_msg = mock_message.answer.call_args[0][0]
+        block_msg = aiogram_message.answer.call_args[0][0]
         assert "🚫" in block_msg
         assert "заблокированы" in block_msg
         assert "60" in block_msg  # Block duration
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_blocked_user_callback_query(self, mock_callback_query):
+    async def test_blocked_user_callback_query(self, aiogram_callback_query):
         """Test blocked user with CallbackQuery"""
         middleware = ThrottlingMiddleware(
             default_rate=2.0,
@@ -238,19 +238,19 @@ class TestThrottlingBlocking:
         data = {}
 
         # Trigger block
-        await middleware(handler, mock_callback_query, data)
-        await middleware(handler, mock_callback_query, data)
-        await middleware(handler, mock_callback_query, data)
+        await middleware(handler, aiogram_callback_query, data)
+        await middleware(handler, aiogram_callback_query, data)
+        await middleware(handler, aiogram_callback_query, data)
 
         # Verify alert
-        mock_callback_query.answer.assert_called()
-        call_args = mock_callback_query.answer.call_args
+        aiogram_callback_query.answer.assert_called()
+        call_args = aiogram_callback_query.answer.call_args
         assert "🚫" in call_args[0][0]
         assert call_args[1]['show_alert'] is True
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_blocked_user_shows_remaining_time(self, mock_message):
+    async def test_blocked_user_shows_remaining_time(self, aiogram_message):
         """Test that block message shows remaining time"""
         middleware = ThrottlingMiddleware(
             default_rate=2.0,
@@ -260,19 +260,19 @@ class TestThrottlingBlocking:
         handler = AsyncMock()
         data = {}
 
-        user_id = mock_message.from_user.id
+        user_id = aiogram_message.from_user.id
 
         # Trigger block
-        await middleware(handler, mock_message, data)
-        await middleware(handler, mock_message, data)
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
+        await middleware(handler, aiogram_message, data)
+        await middleware(handler, aiogram_message, data)
 
         # Try again while blocked
-        mock_message.answer.reset_mock()
-        await middleware(handler, mock_message, data)
+        aiogram_message.answer.reset_mock()
+        await middleware(handler, aiogram_message, data)
 
         # Verify remaining time is shown
-        block_msg = mock_message.answer.call_args[0][0]
+        block_msg = aiogram_message.answer.call_args[0][0]
         assert "⏳" in block_msg
         assert "Попробуйте через" in block_msg
 
@@ -282,7 +282,7 @@ class TestThrottlingAutoUnblock:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_auto_unblock_after_duration(self, mock_message):
+    async def test_auto_unblock_after_duration(self, aiogram_message):
         """Test that users are automatically unblocked after duration"""
         middleware = ThrottlingMiddleware(
             default_rate=2.0,
@@ -292,12 +292,12 @@ class TestThrottlingAutoUnblock:
         handler = AsyncMock()
         data = {}
 
-        user_id = mock_message.from_user.id
+        user_id = aiogram_message.from_user.id
 
         # Trigger block
-        await middleware(handler, mock_message, data)
-        await middleware(handler, mock_message, data)
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
+        await middleware(handler, aiogram_message, data)
+        await middleware(handler, aiogram_message, data)
 
         assert user_id in middleware.blocked_users
 
@@ -306,7 +306,7 @@ class TestThrottlingAutoUnblock:
 
         # Try again - should be unblocked
         handler.reset_mock()
-        result = await middleware(handler, mock_message, data)
+        result = await middleware(handler, aiogram_message, data)
 
         assert user_id not in middleware.blocked_users
         assert middleware.warnings[user_id] == 0
@@ -314,7 +314,7 @@ class TestThrottlingAutoUnblock:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_warnings_reset_after_unblock(self, mock_message):
+    async def test_warnings_reset_after_unblock(self, aiogram_message):
         """Test that warnings are reset when user is unblocked"""
         middleware = ThrottlingMiddleware(
             default_rate=2.0,
@@ -324,12 +324,12 @@ class TestThrottlingAutoUnblock:
         handler = AsyncMock()
         data = {}
 
-        user_id = mock_message.from_user.id
+        user_id = aiogram_message.from_user.id
 
         # Trigger block
-        await middleware(handler, mock_message, data)
-        await middleware(handler, mock_message, data)
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
+        await middleware(handler, aiogram_message, data)
+        await middleware(handler, aiogram_message, data)
 
         assert middleware.warnings[user_id] >= middleware.max_warnings
 
@@ -337,7 +337,7 @@ class TestThrottlingAutoUnblock:
         await asyncio.sleep(1.1)
 
         # Check if blocked (triggers auto-unblock)
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
 
         # Warnings should be reset
         assert middleware.warnings[user_id] == 0
@@ -417,36 +417,36 @@ class TestThrottlingErrorHandling:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_message_send_error_handled(self, mock_message):
+    async def test_message_send_error_handled(self, aiogram_message):
         """Test that message sending errors don't crash middleware"""
         middleware = ThrottlingMiddleware(default_rate=2.0)
         handler = AsyncMock()
         data = {}
 
         # First request
-        await middleware(handler, mock_message, data)
+        await middleware(handler, aiogram_message, data)
 
         # Make answer() fail
-        mock_message.answer = AsyncMock(side_effect=Exception("Send failed"))
+        aiogram_message.answer = AsyncMock(side_effect=Exception("Send failed"))
 
         # Rapid request should still be blocked even if message fails
-        result = await middleware(handler, mock_message, data)
+        result = await middleware(handler, aiogram_message, data)
         assert result is None
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_callback_send_error_handled(self, mock_callback_query):
+    async def test_callback_send_error_handled(self, aiogram_callback_query):
         """Test that callback answer errors don't crash middleware"""
         middleware = ThrottlingMiddleware(default_rate=2.0, max_warnings=2)
         handler = AsyncMock()
         data = {}
 
         # Trigger block
-        await middleware(handler, mock_callback_query, data)
-        await middleware(handler, mock_callback_query, data)
+        await middleware(handler, aiogram_callback_query, data)
+        await middleware(handler, aiogram_callback_query, data)
 
         # Make answer() fail
-        mock_callback_query.answer = AsyncMock(side_effect=Exception("Send failed"))
+        aiogram_callback_query.answer = AsyncMock(side_effect=Exception("Send failed"))
 
-        result = await middleware(handler, mock_callback_query, data)
+        result = await middleware(handler, aiogram_callback_query, data)
         assert result is None  # Should still block

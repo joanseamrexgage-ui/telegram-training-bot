@@ -288,11 +288,13 @@ async def cleanup():
 def aiogram_message():
     """
     Create real aiogram Message instance for middleware testing.
-    
+
     Middlewares use isinstance() checks that fail with MagicMock.
+    Uses monkeypatch to add mock methods since aiogram types are frozen.
     """
     from aiogram.types import Message, User, Chat
-    
+    from unittest.mock import patch
+
     # Create User
     user = User(
         id=12345,
@@ -301,13 +303,13 @@ def aiogram_message():
         last_name="User",
         username="testuser"
     )
-    
+
     # Create Chat
     chat = Chat(
         id=12345,
         type="private"
     )
-    
+
     # Create Message
     message = Message(
         message_id=1,
@@ -316,12 +318,16 @@ def aiogram_message():
         from_user=user,
         text="/start"
     )
-    
-    # Add async mock methods
-    message.answer = AsyncMock(return_value=MagicMock(message_id=2))
-    message.reply = AsyncMock(return_value=MagicMock(message_id=3))
-    message.delete = AsyncMock(return_value=True)
-    
+
+    # Patch methods on the instance using object.__setattr__ (works with frozen models)
+    answer_mock = AsyncMock(return_value=MagicMock(message_id=2))
+    reply_mock = AsyncMock(return_value=MagicMock(message_id=3))
+    delete_mock = AsyncMock(return_value=True)
+
+    object.__setattr__(message, 'answer', answer_mock)
+    object.__setattr__(message, 'reply', reply_mock)
+    object.__setattr__(message, 'delete', delete_mock)
+
     return message
 
 
@@ -331,7 +337,7 @@ def aiogram_callback_query():
     Create real aiogram CallbackQuery instance for middleware testing.
     """
     from aiogram.types import CallbackQuery, User, Message, Chat
-    
+
     # Create User
     user = User(
         id=12345,
@@ -340,22 +346,26 @@ def aiogram_callback_query():
         last_name="User",
         username="testuser"
     )
-    
+
     # Create Chat
     chat = Chat(
         id=12345,
         type="private"
     )
-    
+
     # Create Message for callback
     message = Message(
         message_id=1,
         date=datetime.utcnow(),
         chat=chat
     )
-    message.edit_text = AsyncMock(return_value=True)
-    message.delete = AsyncMock(return_value=True)
-    
+
+    # Patch message methods
+    edit_text_mock = AsyncMock(return_value=True)
+    delete_mock = AsyncMock(return_value=True)
+    object.__setattr__(message, 'edit_text', edit_text_mock)
+    object.__setattr__(message, 'delete', delete_mock)
+
     # Create CallbackQuery
     callback = CallbackQuery(
         id="callback_1",
@@ -364,8 +374,9 @@ def aiogram_callback_query():
         data="test_callback",
         message=message
     )
-    
+
     # Add async mock methods
-    callback.answer = AsyncMock(return_value=True)
-    
+    answer_mock = AsyncMock(return_value=True)
+    object.__setattr__(callback, 'answer', answer_mock)
+
     return callback

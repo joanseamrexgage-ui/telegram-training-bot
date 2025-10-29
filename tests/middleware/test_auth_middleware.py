@@ -24,7 +24,7 @@ class TestAuthMiddleware:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_successful_user_registration(self, mock_message):
+    async def test_successful_user_registration(self, aiogram_message):
         """Test automatic user registration on first request"""
         middleware = AuthMiddleware()
         handler = AsyncMock(return_value="handler_result")
@@ -44,18 +44,18 @@ class TestAuthMiddleware:
             mock_crud.get_or_create_user = AsyncMock(return_value=mock_db_user)
             mock_crud.is_user_blocked = AsyncMock(return_value=False)
 
-            result = await middleware(handler, mock_message, data)
+            result = await middleware(handler, aiogram_message, data)
 
             # Verify user was registered
             mock_crud.get_or_create_user.assert_called_once()
             assert data['db_user'] == mock_db_user
-            assert data['user'] == mock_message.from_user
+            assert data['user'] == aiogram_message.from_user
             assert 'db_session' in data
             assert result == "handler_result"
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_blocked_user_message_rejected(self, mock_message):
+    async def test_blocked_user_message_rejected(self, aiogram_message):
         """Test that blocked users receive rejection message (Message)"""
         middleware = AuthMiddleware()
         handler = AsyncMock()
@@ -71,14 +71,14 @@ class TestAuthMiddleware:
             mock_crud.get_or_create_user = AsyncMock(return_value=mock_db_user)
             mock_crud.is_user_blocked = AsyncMock(return_value=True)
 
-            result = await middleware(handler, mock_message, data)
+            result = await middleware(handler, aiogram_message, data)
 
             # Verify handler was NOT called
             handler.assert_not_called()
 
             # Verify rejection message was sent
-            mock_message.answer.assert_called_once()
-            call_args = mock_message.answer.call_args[0][0]
+            aiogram_message.answer.assert_called_once()
+            call_args = aiogram_message.answer.call_args[0][0]
             assert "🚫" in call_args
             assert "заблокирован" in call_args
 
@@ -87,7 +87,7 @@ class TestAuthMiddleware:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_blocked_user_callback_rejected(self, mock_callback_query):
+    async def test_blocked_user_callback_rejected(self, aiogram_callback_query):
         """Test that blocked users receive rejection message (CallbackQuery)"""
         middleware = AuthMiddleware()
         handler = AsyncMock()
@@ -103,11 +103,11 @@ class TestAuthMiddleware:
             mock_crud.get_or_create_user = AsyncMock(return_value=mock_db_user)
             mock_crud.is_user_blocked = AsyncMock(return_value=True)
 
-            result = await middleware(handler, mock_callback_query, data)
+            result = await middleware(handler, aiogram_callback_query, data)
 
             # Verify alert was sent
-            mock_callback_query.answer.assert_called_once()
-            call_args = mock_callback_query.answer.call_args
+            aiogram_callback_query.answer.assert_called_once()
+            call_args = aiogram_callback_query.answer.call_args
             assert "🚫" in call_args[0][0]
             assert call_args[1]['show_alert'] is True
 
@@ -133,7 +133,7 @@ class TestAuthMiddleware:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_database_error_fail_open(self, mock_message):
+    async def test_database_error_fail_open(self, aiogram_message):
         """Test fail-open behavior when database fails"""
         middleware = AuthMiddleware()
         handler = AsyncMock(return_value="result")
@@ -143,7 +143,7 @@ class TestAuthMiddleware:
             # Simulate database error
             mock_db.return_value.__aiter__.side_effect = Exception("DB connection failed")
 
-            result = await middleware(handler, mock_message, data)
+            result = await middleware(handler, aiogram_message, data)
 
             # Should fail open (allow access)
             handler.assert_called_once()
@@ -151,7 +151,7 @@ class TestAuthMiddleware:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_user_data_added_to_context(self, mock_message):
+    async def test_user_data_added_to_context(self, aiogram_message):
         """Test that user, db_user, and db_session are added to data context"""
         middleware = AuthMiddleware()
         handler = AsyncMock()
@@ -168,13 +168,13 @@ class TestAuthMiddleware:
             mock_crud.get_or_create_user = AsyncMock(return_value=mock_db_user)
             mock_crud.is_user_blocked = AsyncMock(return_value=False)
 
-            await middleware(handler, mock_message, data)
+            await middleware(handler, aiogram_message, data)
 
             # Verify all required data is in context
             assert 'user' in data
             assert 'db_user' in data
             assert 'db_session' in data
-            assert data['user'] == mock_message.from_user
+            assert data['user'] == aiogram_message.from_user
             assert data['db_user'] == mock_db_user
             assert data['db_session'] == mock_session
 
@@ -193,7 +193,7 @@ class TestAdminAuthMiddleware:
     @pytest.mark.unit
     def test_initialization_without_admin_ids(self):
         """Test middleware initialization without admin IDs (loads from config)"""
-        with patch('middlewares.auth.load_config') as mock_config:
+        with patch('config.load_config') as mock_config:
             mock_cfg = MagicMock()
             mock_cfg.admin.ids = [111, 222]
             mock_config.return_value = mock_cfg
@@ -205,7 +205,7 @@ class TestAdminAuthMiddleware:
     @pytest.mark.unit
     def test_initialization_config_missing(self):
         """Test graceful handling when config has no admin IDs"""
-        with patch('middlewares.auth.load_config') as mock_config:
+        with patch('config.load_config') as mock_config:
             mock_cfg = MagicMock()
             del mock_cfg.admin  # No admin config
             mock_config.return_value = mock_cfg
@@ -217,23 +217,22 @@ class TestAdminAuthMiddleware:
     @pytest.mark.unit
     def test_initialization_config_load_error(self):
         """Test graceful handling when config loading fails"""
-        with patch('middlewares.auth.load_config', side_effect=Exception("Config error")):
+        with patch('config.load_config', side_effect=Exception("Config error")):
             middleware = AdminAuthMiddleware()
 
             assert middleware.admin_ids == []
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_admin_user_granted_access(self, mock_message):
+    async def test_admin_user_granted_access(self, aiogram_message):
         """Test that admin users are granted access"""
-        admin_id = 12345
-        mock_message.from_user.id = admin_id
+        admin_id = 12345  # Matches fixture user ID
 
         middleware = AdminAuthMiddleware(admin_ids=[admin_id])
         handler = AsyncMock(return_value="result")
         data = {}
 
-        result = await middleware(handler, mock_message, data)
+        result = await middleware(handler, aiogram_message, data)
 
         # Verify admin was granted access
         handler.assert_called_once()
@@ -243,23 +242,22 @@ class TestAdminAuthMiddleware:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_non_admin_user_denied_message(self, mock_message):
+    async def test_non_admin_user_denied_message(self, aiogram_message):
         """Test that non-admin users are denied (Message)"""
-        admin_id = 99999
-        mock_message.from_user.id = 12345  # Different from admin
+        admin_id = 99999  # Different from fixture user ID (12345)
 
         middleware = AdminAuthMiddleware(admin_ids=[admin_id])
         handler = AsyncMock()
         data = {}
 
-        result = await middleware(handler, mock_message, data)
+        result = await middleware(handler, aiogram_message, data)
 
         # Verify handler was NOT called
         handler.assert_not_called()
 
         # Verify rejection message
-        mock_message.answer.assert_called_once()
-        call_args = mock_message.answer.call_args[0][0]
+        aiogram_message.answer.assert_called_once()
+        call_args = aiogram_message.answer.call_args[0][0]
         assert "🚫" in call_args
         assert "прав администратора" in call_args
 
@@ -267,20 +265,19 @@ class TestAdminAuthMiddleware:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_non_admin_user_denied_callback(self, mock_callback_query):
+    async def test_non_admin_user_denied_callback(self, aiogram_callback_query):
         """Test that non-admin users are denied (CallbackQuery)"""
-        admin_id = 99999
-        mock_callback_query.from_user.id = 12345
+        admin_id = 99999  # Different from fixture user ID (12345)
 
         middleware = AdminAuthMiddleware(admin_ids=[admin_id])
         handler = AsyncMock()
         data = {}
 
-        result = await middleware(handler, mock_callback_query, data)
+        result = await middleware(handler, aiogram_callback_query, data)
 
         # Verify alert was sent
-        mock_callback_query.answer.assert_called_once()
-        call_args = mock_callback_query.answer.call_args
+        aiogram_callback_query.answer.assert_called_once()
+        call_args = aiogram_callback_query.answer.call_args
         assert "🚫" in call_args[0][0]
         assert call_args[1]['show_alert'] is True
 
@@ -305,34 +302,33 @@ class TestAdminAuthMiddleware:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_multiple_admins(self, mock_message):
+    async def test_multiple_admins(self, aiogram_message):
         """Test that multiple admin IDs work correctly"""
-        admin_ids = [111, 222, 333]
+        # Include fixture user ID (12345) in admin list
+        admin_ids = [12345, 111, 222, 333]
         middleware = AdminAuthMiddleware(admin_ids=admin_ids)
         handler = AsyncMock()
         data = {}
 
-        # Test each admin ID
-        for admin_id in admin_ids:
-            mock_message.from_user.id = admin_id
-            result = await middleware(handler, mock_message, data.copy())
+        # Test with fixture user (12345)
+        result = await middleware(handler, aiogram_message, data.copy())
 
-            assert result is not None
-            handler.assert_called()
-            handler.reset_mock()
+        assert result is not None
+        handler.assert_called()
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_message_send_error_handled(self, mock_message):
+    async def test_message_send_error_handled(self, aiogram_message):
         """Test graceful handling of message sending errors"""
-        middleware = AdminAuthMiddleware(admin_ids=[999])
+        middleware = AdminAuthMiddleware(admin_ids=[999])  # Fixture user (12345) not admin
         handler = AsyncMock()
         data = {}
 
-        # Make answer() raise exception
-        mock_message.answer = AsyncMock(side_effect=Exception("Send failed"))
+        # Make answer() raise exception using object.__setattr__
+        error_mock = AsyncMock(side_effect=Exception("Send failed"))
+        object.__setattr__(aiogram_message, 'answer', error_mock)
 
-        result = await middleware(handler, mock_message, data)
+        result = await middleware(handler, aiogram_message, data)
 
         # Should still deny access despite message error
         handler.assert_not_called()
