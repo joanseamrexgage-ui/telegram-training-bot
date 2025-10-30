@@ -209,12 +209,12 @@ async def main():
             throttle_redis = await throttle_manager.get_redis()
 
             # Create middleware with Sentinel-backed Redis
-            # UX-001 FIX: "Invisible" throttling - user-friendly rate limits
+            # UX-002 FIX: "Truly invisible" throttling - smooth navigation
             throttle_config = RateLimitConfig(
-                max_tokens=15,              # Burst: 15 requests (was: 5)
-                refill_rate=2.0,           # Recovery: 2 req/sec (was: 0.5)
-                violation_threshold=8,      # Warnings: 8 (was: 3)
-                block_duration=10          # Block: 10 sec (was: 60)
+                max_tokens=100,             # Burst: 100 requests - smooth navigation
+                refill_rate=20.0,          # Recovery: 20 req/sec - instant refill
+                violation_threshold=50,     # Warnings: 50 - rare warnings
+                block_duration=10          # Block: 10 sec - only for real spam
             )
 
             throttling_middleware = ThrottlingMiddlewareV2(
@@ -234,14 +234,14 @@ async def main():
 
         else:
             # Simple Redis mode (development)
-            # UX-001 FIX: "Invisible" throttling - user-friendly rate limits
+            # UX-002 FIX: "Truly invisible" throttling - smooth navigation
             throttling_middleware = await create_redis_throttling(
                 redis_url=f"{config.redis.url}/{config.redis.throttle_db}",
-                max_tokens=15,              # Burst: 15 requests (was: 5)
-                refill_rate=2.0,           # Recovery: 2 req/sec (was: 0.5)
-                violation_threshold=8,      # Warnings: 8 (was: 3)
-                block_duration=10,         # Block: 10 sec (was: 60)
-                admin_ids=config.tg_bot.admin_ids  # UX-001: Admins bypass rate limiting
+                max_tokens=100,             # Burst: 100 requests - smooth navigation
+                refill_rate=20.0,          # Recovery: 20 req/sec - instant refill
+                violation_threshold=50,     # Warnings: 50 - rare warnings
+                block_duration=10,         # Block: 10 sec - only for real spam
+                admin_ids=config.tg_bot.admin_ids  # UX-002: Admins bypass rate limiting
             )
             dp.message.middleware(throttling_middleware)
             dp.callback_query.middleware(throttling_middleware)
