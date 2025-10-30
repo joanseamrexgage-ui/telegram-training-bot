@@ -54,11 +54,15 @@ class TestProductionReadiness:
             forbidden_values = ["password123", "admin", "12345"]
 
             for forbidden in forbidden_values:
-                # Allow in comments, but not as actual values
+                # Allow in comments and variable names, check only VALUES
                 lines = content.split("\n")
                 for line in lines:
                     if not line.strip().startswith("#") and "=" in line:
-                        assert forbidden not in line.lower(), f"Default password '{forbidden}' found in template"
+                        # Split and check only the value part (after =)
+                        parts = line.split("=", 1)
+                        if len(parts) == 2:
+                            value = parts[1].strip()
+                            assert forbidden not in value.lower(), f"Default password '{forbidden}' found in template value: {value}"
 
     def test_docker_compose_production_exists(self):
         """Verify Docker Compose production configuration exists"""
