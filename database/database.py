@@ -122,7 +122,7 @@ class DatabaseManager:
         try:
             async with self.engine.connect() as conn:
                 result = await conn.execute(text("SELECT 1"))
-                await result.fetchone()
+                result.fetchone()  # Row object is not awaitable
             return True
         except Exception as e:
             logger.error(f"Не удалось подключиться к базе данных: {e}")
