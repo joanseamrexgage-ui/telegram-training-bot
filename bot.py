@@ -252,10 +252,13 @@ async def main():
                        "   ⚠️ Throttling ONLY for messages, NOT for menu navigation")
 
     except Exception as e:
-        logger.error(
-            f"⚠️ Throttling Middleware НЕДОСТУПЕН: {e}\n"
-            f"   Бот НЕ защищен от спама!"
+        logger.warning(
+            f"⚠️ Redis Throttling недоступен: {e}\n"
+            f"   ✅ Throttling ОТКЛЮЧЕН - навигация работает без ограничений!\n"
+            f"   (Для production рекомендуется настроить Redis)"
         )
+        # UX-004 FIX: Explicitly NO throttling when Redis unavailable
+        # Better UX with no throttling than broken throttling
 
     # 2. TASK 1.3: Input Sanitizer Middleware - автоматическая очистка ввода
     input_sanitizer = InputSanitizerMiddleware(
