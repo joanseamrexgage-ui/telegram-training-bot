@@ -263,10 +263,37 @@ def get_back_to_general_info() -> InlineKeyboardMarkup:
     return keyboard
 
 
+def get_park_address_detail_keyboard(park_code: str) -> InlineKeyboardMarkup:
+    """
+    Клавиатура для детального просмотра адреса парка с навигацией.
+
+    Args:
+        park_code: Код парка (zeleno, kashir, columb)
+
+    Returns:
+        InlineKeyboardMarkup с кнопками навигации по парку, назад и домой
+    """
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🗺️ Навигация по парку",
+            callback_data=f"nav_{park_code}"
+        )],
+        [InlineKeyboardButton(
+            text="◀️ К списку парков",
+            callback_data="gen_addresses"
+        )],
+        [InlineKeyboardButton(
+            text="🏠 Главное меню",
+            callback_data="main_menu"
+        )]
+    ])
+    return keyboard
+
+
 def get_back_to_addresses() -> InlineKeyboardMarkup:
     """
     Кнопка возврата к списку адресов.
-    
+
     Returns:
         InlineKeyboardMarkup с кнопкой назад к адресам
     """

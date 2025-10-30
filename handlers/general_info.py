@@ -26,6 +26,7 @@ from keyboards.general_info_kb import (
     get_orders_menu,
     get_discounts_parks_menu,
     get_back_to_general_info,
+    get_park_address_detail_keyboard,  # Клавиатура с навигацией по парку
     get_back_to_addresses,
     get_back_to_phones,
     get_back_to_emergency,
@@ -147,7 +148,7 @@ async def show_park_address(callback: CallbackQuery):
     try:
         await callback.message.edit_text(
             text=text,
-            reply_markup=get_back_to_addresses()
+            reply_markup=get_park_address_detail_keyboard(park_code)
         )
         await callback.answer()
         logger.info(f"✅ Адрес парка '{park_code}' успешно показан пользователю {callback.from_user.id}")
@@ -155,6 +156,76 @@ async def show_park_address(callback: CallbackQuery):
         # ИСПРАВЛЕНИЕ: Расширенное логирование ошибок с полным traceback
         logger.error(f"❌ Ошибка в show_park_address для парка '{park_code}', пользователь {callback.from_user.id}: {e}", exc_info=True)
         await callback.answer("Ошибка загрузки информации")
+
+
+@router.callback_query(F.data.startswith("nav_"))
+async def show_park_navigation(callback: CallbackQuery):
+    """
+    Показывает навигацию внутри конкретного парка.
+
+    Args:
+        callback: Callback с данными nav_zeleno, nav_kashir, nav_columb
+    """
+    park_code = callback.data.split("_")[1]  # zeleno, kashir, columb
+    logger.info(f"🗺️ Пользователь {callback.from_user.id} запрашивает навигацию парка '{park_code}'")
+
+    addresses = CONTENT.get("addresses", {})
+    park_info = addresses.get(park_code, {})
+    navigation = park_info.get("indoor_navigation", {})
+
+    if not navigation:
+        logger.warning(f"⚠️ Навигация для парка '{park_code}' не найдена")
+        await callback.answer("Навигация для этого парка пока недоступна", show_alert=True)
+        return
+
+    # Формируем текст с навигацией
+    text = f"<b>{navigation.get('title', '🗺️ Навигация внутри парка')}</b>\n\n"
+    text += f"<b>🏢 Парк:</b> {park_info.get('name')}\n"
+    text += f"<b>📍 Этаж:</b> {navigation.get('floor')}\n"
+    text += f"<b>🗺️ Расположение:</b> {navigation.get('location')}\n\n"
+
+    # Если есть инструкции от входа (только для Columbus)
+    if 'navigation_from_entrance' in navigation:
+        text += "<b>🚶 Как найти от входа в ТРЦ:</b>\n"
+        text += "\n".join(navigation['navigation_from_entrance'])
+        text += "\n\n"
+
+    # Добавляем зоны парка
+    text += "<b>🏢 Зоны внутри парка:</b>\n\n"
+    for zone in navigation.get('zones', []):
+        text += f"<b>{zone.get('name')}</b>\n"
+        text += f"📝 {zone.get('description')}\n"
+        text += f"🎯 {zone.get('landmarks')}\n\n"
+
+    # Важные заметки
+    if navigation.get('important_notes'):
+        text += "<b>❗ Важная информация:</b>\n"
+        text += "\n".join(navigation['important_notes'])
+
+    try:
+        # Если текст слишком длинный, разбиваем на части
+        if len(text) > 4000:
+            parts = [text[i:i+4000] for i in range(0, len(text), 4000)]
+            for i, part in enumerate(parts):
+                if i == len(parts) - 1:
+                    # Последняя часть с кнопками
+                    await callback.message.answer(
+                        text=part,
+                        reply_markup=get_park_address_detail_keyboard(park_code)
+                    )
+                else:
+                    await callback.message.answer(text=part)
+            await callback.message.delete()
+        else:
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=get_park_address_detail_keyboard(park_code)
+            )
+        await callback.answer()
+        logger.info(f"✅ Навигация парка '{park_code}' успешно показана пользователю {callback.from_user.id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в show_park_navigation для парка '{park_code}': {e}", exc_info=True)
+        await callback.answer("Ошибка загрузки навигации")
 
 
 # ========== ВАЖНЫЕ ТЕЛЕФОНЫ ==========
