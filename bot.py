@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import load_config
 from database.database import init_db, close_db
-from handlers import start, general_info, sales, sport, admin, common
+from handlers import start, general_info, sales, sport, admin, common, navigation, bar, kitchen
 from middlewares.auth import AuthMiddleware
 from middlewares.logging_v2 import AsyncLoggingMiddleware  # CRIT-004 FIX: v2.0
 from middlewares.throttling_v2 import create_redis_throttling, RateLimitConfig  # CRIT-002 FIX: v2.0
@@ -287,6 +287,9 @@ async def main():
     # Порядок регистрации определяет приоритет обработки
     dp.include_router(start.router)
     dp.include_router(general_info.router)
+    dp.include_router(navigation.router)
+    dp.include_router(bar.router)
+    dp.include_router(kitchen.router)
     dp.include_router(sales.router)
     dp.include_router(sport.router)
     dp.include_router(admin.router)

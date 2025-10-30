@@ -10,12 +10,15 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Главное меню бота"""
     builder = InlineKeyboardBuilder()
-    
+
     builder.button(text="🟢 Общая информация", callback_data="general_info")
+    builder.button(text="🗺️ Навигация", callback_data="navigation")
+    builder.button(text="☕ БАР", callback_data="bar")
+    builder.button(text="🍽️ Наша кухня", callback_data="kitchen")
     builder.button(text="🔴 Отдел продаж", callback_data="sales")
     builder.button(text="🔵 Спортивный отдел", callback_data="sport")
     builder.button(text="🔐 Администрация парка", callback_data="admin")
-    
+
     builder.adjust(1)  # По одной кнопке в ряд
     return builder.as_markup()
 
