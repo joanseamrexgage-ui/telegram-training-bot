@@ -224,12 +224,14 @@ async def main():
             )
 
             dp.message.middleware(throttling_middleware)
-            dp.callback_query.middleware(throttling_middleware)
+            # UX-003 FIX: NO throttling for callback_query (menu navigation)
+            # Users can click buttons freely without any limits
 
             logger.info(
                 f"✅ Redis Throttling Middleware активирован через Sentinel HA\n"
                 f"   Master: {config.redis.master_name}\n"
-                f"   Circuit Breaker: ENABLED"
+                f"   Circuit Breaker: ENABLED\n"
+                f"   ⚠️ Throttling ONLY for messages, NOT for menu navigation"
             )
 
         else:
@@ -244,8 +246,10 @@ async def main():
                 admin_ids=config.tg_bot.admin_ids  # UX-002: Admins bypass rate limiting
             )
             dp.message.middleware(throttling_middleware)
-            dp.callback_query.middleware(throttling_middleware)
-            logger.info("✅ Redis Throttling Middleware активирован (simple mode)")
+            # UX-003 FIX: NO throttling for callback_query (menu navigation)
+            # Users can click buttons freely without any limits
+            logger.info("✅ Redis Throttling Middleware активирован (simple mode)\n"
+                       "   ⚠️ Throttling ONLY for messages, NOT for menu navigation")
 
     except Exception as e:
         logger.error(
