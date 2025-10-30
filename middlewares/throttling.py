@@ -76,6 +76,9 @@ class ThrottlingMiddleware(BaseMiddleware):
             # Время блокировки истекло - разблокируем
             del self.blocked_users[user_id]
             self.warnings[user_id] = 0  # Сбрасываем предупреждения
+            # Reset last_request_time to allow immediate request after unblock
+            if user_id in self.last_request_time:
+                del self.last_request_time[user_id]
             logger.info(f"🔓 Пользователь {user_id} автоматически разблокирован")
             return False
         

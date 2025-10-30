@@ -14,6 +14,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import User, Chat
 
 from states.menu_states import (
@@ -57,14 +58,16 @@ def mock_chat():
 @pytest.fixture
 async def fsm_context(storage, mock_user, mock_chat):
     """Create FSMContext for testing"""
-    # Create a context for the user
+    # Create storage key for the user (Aiogram 3.x API)
+    key = StorageKey(
+        bot_id=123,  # Mock bot ID
+        chat_id=mock_chat.id,
+        user_id=mock_user.id
+    )
+    # Create FSM context
     context = FSMContext(
         storage=storage,
-        key=storage.key(
-            bot_id=123,  # Mock bot ID
-            chat_id=mock_chat.id,
-            user_id=mock_user.id
-        )
+        key=key
     )
     return context
 

@@ -348,18 +348,34 @@ class TestThrottlingMultipleUsers:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_independent_user_tracking(self):
+    async def test_independent_user_tracking(self, aiogram_message, aiogram_callback_query):
         """Test that different users are tracked independently"""
+        from aiogram.types import Message, User, Chat
+        from datetime import datetime
+
         middleware = ThrottlingMiddleware(default_rate=2.0)
 
-        # Create two different users
-        user1_msg = MagicMock()
-        user1_msg.from_user = MagicMock(id=111, username="user1")
-        user1_msg.answer = AsyncMock()
+        # Create two different users with proper Message objects
+        user1 = User(id=111, is_bot=False, first_name="User1")
+        user1_msg = Message(
+            message_id=1,
+            date=datetime.utcnow(),
+            chat=Chat(id=111, type="private"),
+            from_user=user1
+        )
+        # Add mock answer method (bypass frozen model)
+        answer_mock1 = AsyncMock()
+        object.__setattr__(user1_msg, 'answer', answer_mock1)
 
-        user2_msg = MagicMock()
-        user2_msg.from_user = MagicMock(id=222, username="user2")
-        user2_msg.answer = AsyncMock()
+        user2 = User(id=222, is_bot=False, first_name="User2")
+        user2_msg = Message(
+            message_id=2,
+            date=datetime.utcnow(),
+            chat=Chat(id=222, type="private"),
+            from_user=user2
+        )
+        answer_mock2 = AsyncMock()
+        object.__setattr__(user2_msg, 'answer', answer_mock2)
 
         handler = AsyncMock()
 
@@ -383,18 +399,34 @@ class TestThrottlingMultipleUsers:
     @pytest.mark.unit
     async def test_one_user_blocked_others_allowed(self):
         """Test that blocking one user doesn't affect others"""
+        from aiogram.types import Message, User, Chat
+        from datetime import datetime
+
         middleware = ThrottlingMiddleware(
             default_rate=2.0,
             max_warnings=2
         )
 
-        user1_msg = MagicMock()
-        user1_msg.from_user = MagicMock(id=111)
-        user1_msg.answer = AsyncMock()
+        # Create proper Message objects for two users
+        user1 = User(id=111, is_bot=False, first_name="User1")
+        user1_msg = Message(
+            message_id=1,
+            date=datetime.utcnow(),
+            chat=Chat(id=111, type="private"),
+            from_user=user1
+        )
+        answer_mock1 = AsyncMock()
+        object.__setattr__(user1_msg, 'answer', answer_mock1)
 
-        user2_msg = MagicMock()
-        user2_msg.from_user = MagicMock(id=222)
-        user2_msg.answer = AsyncMock()
+        user2 = User(id=222, is_bot=False, first_name="User2")
+        user2_msg = Message(
+            message_id=2,
+            date=datetime.utcnow(),
+            chat=Chat(id=222, type="private"),
+            from_user=user2
+        )
+        answer_mock2 = AsyncMock()
+        object.__setattr__(user2_msg, 'answer', answer_mock2)
 
         handler = AsyncMock()
 
@@ -426,8 +458,9 @@ class TestThrottlingErrorHandling:
         # First request
         await middleware(handler, aiogram_message, data)
 
-        # Make answer() fail
-        aiogram_message.answer = AsyncMock(side_effect=Exception("Send failed"))
+        # Make answer() fail (use object.__setattr__ for frozen model)
+        answer_mock = AsyncMock(side_effect=Exception("Send failed"))
+        object.__setattr__(aiogram_message, 'answer', answer_mock)
 
         # Rapid request should still be blocked even if message fails
         result = await middleware(handler, aiogram_message, data)
@@ -445,8 +478,9 @@ class TestThrottlingErrorHandling:
         await middleware(handler, aiogram_callback_query, data)
         await middleware(handler, aiogram_callback_query, data)
 
-        # Make answer() fail
-        aiogram_callback_query.answer = AsyncMock(side_effect=Exception("Send failed"))
+        # Make answer() fail (use object.__setattr__ for frozen model)
+        answer_mock = AsyncMock(side_effect=Exception("Send failed"))
+        object.__setattr__(aiogram_callback_query, 'answer', answer_mock)
 
         result = await middleware(handler, aiogram_callback_query, data)
         assert result is None  # Should still block
