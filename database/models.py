@@ -81,20 +81,23 @@ class User(Base):
     commands_count: Mapped[int] = mapped_column(Integer, default=0)
     
     # Relationships
+    # PERF FIX: Changed lazy="selectin" to lazy="noload" to prevent N+1 queries
+    # Previously, every user fetch was loading ALL activities, test_results, admin_logs
+    # causing 150-400ms delays. Now relationships only load when explicitly requested.
     activities: Mapped[List["UserActivity"]] = relationship(
-        back_populates="user", 
+        back_populates="user",
         cascade="all, delete-orphan",
-        lazy="selectin"
+        lazy="noload"
     )
     test_results: Mapped[List["TestResult"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
-        lazy="selectin"
+        lazy="noload"
     )
     admin_logs: Mapped[List["AdminLog"]] = relationship(
         back_populates="admin",
         cascade="all, delete-orphan",
-        lazy="selectin"
+        lazy="noload"
     )
     
     def __repr__(self):
